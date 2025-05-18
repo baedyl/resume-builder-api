@@ -38,12 +38,12 @@ model Resume {
   linkedIn     String?        // Optional portfolio/LinkedIn link
   website      String?        // Optional portfolio/LinkedIn link
   summary      String?        // Professional summary (text)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
   workExperiences WorkExperience[] // One resume has many work experiences
   educations   Education[]    // One resume has many educations
   skills       Skill[]        // Many-to-many with skills
   certifications Certification[] // One resume has many certifications
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 }
 
 // WorkExperience model for job history
