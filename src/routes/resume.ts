@@ -56,7 +56,6 @@ const ResumeSchema = z.object({
   certifications: z.array(CertificationSchema).default([]),
 });
 
-
 type Skill = z.infer<typeof SkillSchema>;
 type Language = z.infer<typeof LanguageSchema>;
 
@@ -70,15 +69,16 @@ router.post('/', async (req: Request, res: Response) => {
     // Handle custom skills (negative IDs)
     const processedSkills: Skill[] = [];
     for (const skill of resume.skills) {
-      if (skill.id < 0) {
+      try {
         const newSkill = await prisma.skill.upsert({
           where: { name: skill.name },
           update: {},
           create: { name: skill.name },
         });
         processedSkills.push(newSkill);
-      } else {
-        processedSkills.push(skill);
+      } catch (error) {
+        console.error(`Failed to upsert skill: ${skill.name}`, error);
+        throw new Error('Failed to process skills');
       }
     }
     resume.skills = processedSkills;
@@ -86,12 +86,17 @@ router.post('/', async (req: Request, res: Response) => {
     // Handle languages
     const processedLanguages: Language[] = [];
     for (const lang of resume.languages) {
-      const newLang = await prisma.language.upsert({
-        where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-        update: {},
-        create: { name: lang.name, proficiency: lang.proficiency },
-      });
-      processedLanguages.push({ name: newLang.name, proficiency: newLang.proficiency });
+      try {
+        const newLang = await prisma.language.upsert({
+          where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
+          update: {},
+          create: { name: lang.name, proficiency: lang.proficiency },
+        });
+        processedLanguages.push({ name: newLang.name, proficiency: newLang.proficiency });
+      } catch (error) {
+        console.error(`Failed to upsert language: ${lang.name}, ${lang.proficiency}`, error);
+        throw new Error('Failed to process languages');
+      }
     }
     resume.languages = processedLanguages;
 
