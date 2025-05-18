@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User model for future user accounts (e.g., login, saving resumes)
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String?  // Hashed password for authentication (optional for MVP)
+  firstName String?
+  lastName  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  resumes   Resume[] // One user can have multiple resumes
+}
+
+// Resume model to store core resume data
+model Resume {
+  id           Int            @id @default(autoincrement())
+  userId       Int?           @map("user_id") // Links to User (optional for MVP)
+  user         User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fullName     String
+  email        String
+  phone        String?
+  address      String?
+  linkedIn     String?        // Optional portfolio/LinkedIn link
+  website      String?        // Optional portfolio/LinkedIn link
+  summary      String?        // Professional summary (text)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workExperiences WorkExperience[] // One resume has many work experiences
+  educations   Education[]    // One resume has many educations
+  skills       Skill[]        // Many-to-many with skills
+  certifications Certification[] // One resume has many certifications
+}
+
+// WorkExperience model for job history
+model WorkExperience {
+  id          Int      @id @default(autoincrement())
+  resumeId    Int      @map("resume_id")
+  resume      Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  jobTitle    String
+  company     String
+  location    String?
+  startDate   DateTime
+  endDate     DateTime?
+  description String?  // Responsibilities/achievements (text or bullet points as text)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Education model for academic history
+model Education {
+  id           Int      @id @default(autoincrement())
+  resumeId     Int      @map("resume_id")
+  resume       Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  degree       String
+  major        String?
+  institution  String
+  graduationYear Int?
+  gpa          Float?   // Optional, only if relevant (e.g., >3.0)
+  description String?  // Responsibilities/achievements (text or bullet points as text)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Skill model for technical/soft skills (many-to-many with Resume)
+model Skill {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // e.g., "Python", "Communication"
+  resumes   Resume[]  // Many-to-many with resumes
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Certification model for professional certifications
+model Certification {
+  id           Int      @id @default(autoincrement())
+  resumeId     Int      @map("resume_id")
+  resume       Resume   @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  name         String   // e.g., "CPA", "AWS Certified Developer"
+  issuer       String   // e.g., "AICPA", "Amazon"
+  issueDate    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
