@@ -5,7 +5,7 @@ import resumeRouter from './routes/resume';
 import skillRouter from './routes/skill';
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:5173' })); // Adjust for your frontend URL
+app.use(cors({ origin: ['http://localhost:5173', 'https://resume-builder.vercel.app'] }));
 app.use(express.json());
 
 app.use('/api/resumes', resumeRouter);
