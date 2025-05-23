@@ -236,7 +236,7 @@ router.post('/', async (req: Request, res: Response) => {
         const processedLanguages: Language[] = [];
         for (const lang of resume.languages) {
             try {
-                const newLang = await prisma.language.upsert({
+                const newLang = await (prisma as any).Language.upsert({
                     where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
                     update: {},
                     create: { name: lang.name, proficiency: lang.proficiency },
