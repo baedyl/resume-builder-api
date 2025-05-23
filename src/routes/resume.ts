@@ -2,9 +2,16 @@ import PDFDocument from 'pdfkit';
 import { Request, Response, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import OpenAI from 'openai';
 
 const prisma = new PrismaClient();
 const router = Router();
+
+// Initialize OpenRouter API client
+const openrouter = new OpenAI({
+    apiKey: process.env.OPENROUTER_API_KEY,
+    baseURL: 'https://openrouter.ai/api/v1',
+});
 
 // Zod schemas
 const WorkExperienceSchema = z.object({
@@ -56,8 +63,150 @@ const ResumeSchema = z.object({
     certifications: z.array(CertificationSchema).default([]),
 });
 
+const EnhanceDescriptionSchema = z.object({
+    jobTitle: z.string().min(1, 'Job title is required'),
+    description: z.string().min(1, 'Description is required'),
+});
+
+const EnhanceSummarySchema = z.object({
+    summary: z.string().min(1, 'Summary is required'),
+});
+
+let genericDescription = "";
+
 type Skill = z.infer<typeof SkillSchema>;
 type Language = z.infer<typeof LanguageSchema>;
+
+// Fallback enhancement function
+const generateFallbackEnhancement = (jobTitle: string, description: string): string => {
+    const defaultBullets = [
+        `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.`,
+        `• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.`,
+        `• Contributed to key initiatives, adapting to dynamic work environments.`,
+    ];
+    genericDescription = description;
+    return defaultBullets.join('\n');
+};
+
+router.post('/enhance-summary', async (req: Request, res: Response) => {
+    try {
+        // Parse and validate the request body
+        const { summary } = EnhanceSummarySchema.parse(req.body);
+
+        // Define the prompt for OpenRouter API
+        const prompt = `
+You are an expert resume writer. Enhance the following professional summary to make it concise, impactful, and professional. Use strong language to highlight key strengths, experience, and career goals. Ensure the summary is ATS-friendly and suitable for a variety of roles. Return only the enhanced summary as a single paragraph.
+
+Input summary: ${summary}
+        `;
+
+        // Initialize variable to store enhanced summary
+        let enhancedSummary = '';
+        const maxRetries = 2;
+
+        // Retry logic for API call
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await openrouter.chat.completions.create({
+                    model: 'deepseek/deepseek-r1',
+                    messages: [
+                        { role: 'system', content: 'You are a helpful assistant.' },
+                        { role: 'user', content: prompt },
+                    ],
+                    temperature: 0.7 + (attempt - 1) * 0.1, // Increase creativity on retries
+                    max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
+                });
+
+                console.log(`OpenRouter response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
+
+                const content = response.choices[0]?.message?.content?.trim();
+                if (content && content.length > 0) {
+                    enhancedSummary = content;
+                    break;
+                }
+                console.warn(`Empty or invalid response on attempt ${attempt}`);
+            } catch (apiError) {
+                console.error(`API error on attempt ${attempt}:`, apiError);
+                if (attempt === maxRetries) {
+                    throw apiError; // Rethrow on final attempt
+                }
+            }
+        }
+
+        // Use fallback if enhancement fails
+        if (!enhancedSummary) {
+            console.warn('Using fallback summary due to empty API response');
+            enhancedSummary = "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
+        }
+
+        // Return the enhanced summary
+        return res.json({ enhancedSummary });
+    } catch (error) {
+        console.error('Error in enhance-summary endpoint:', error);
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+        }
+        return res.status(500).json({ error: 'Failed to enhance summary' });
+    }
+});
+
+// POST /api/resumes/enhance-description
+router.post('/enhance-description', async (req: Request, res: Response) => {
+    try {
+        const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
+
+        const prompt = `
+      You are an expert resume writer. Enhance the following job description for a ${jobTitle} role to make it professional, ATS-friendly, and impactful. Use strong action verbs, include quantifiable metrics where appropriate, and incorporate relevant keywords for the role. Format the output as bullet points starting with "• ". Each bullet should be concise and highlight key responsibilities or achievements. If the input is brief, expand it logically based on typical duties for the role. Return only the bullet-pointed (min 3 & max 4) text, no additional commentary.
+
+      Input description: ${description}
+    `;
+
+        // Try API call with retries
+        let enhancedDescription = '';
+        const maxRetries = 2;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await openrouter.chat.completions.create({
+                    model: 'deepseek/deepseek-r1',
+                    messages: [
+                        { role: 'system', content: 'You are a helpful assistant.' },
+                        { role: 'user', content: prompt },
+                    ],
+                    temperature: 0.7 + (attempt - 1) * 0.1, // Slightly increase creativity on retries
+                    max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
+                });
+
+                console.log(`OpenRouter response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
+
+                const content = response.choices[0]?.message?.content?.trim();
+                if (content && content.includes('•')) {
+                    enhancedDescription = content;
+                    break;
+                }
+                console.warn(`Empty or invalid response on attempt ${attempt}`);
+            } catch (apiError) {
+                console.error(`API error on attempt ${attempt}:`, apiError);
+                if (attempt === maxRetries) {
+                    throw apiError; // Rethrow on final attempt
+                }
+            }
+        }
+
+        // Use fallback if enhancement is still empty
+        if (!enhancedDescription) {
+            console.warn('Using fallback enhancement due to empty API response');
+            enhancedDescription = generateFallbackEnhancement(jobTitle, genericDescription);
+        }
+
+        return res.json({ enhancedDescription });
+    } catch (error) {
+        console.error('Error in enhance-description endpoint:', error);
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+        }
+        return res.status(500).json({ error: 'Failed to enhance description' });
+    }
+});
 
 // POST /api/resumes
 router.post('/', async (req: Request, res: Response) => {
@@ -87,7 +236,7 @@ router.post('/', async (req: Request, res: Response) => {
         const processedLanguages: Language[] = [];
         for (const lang of resume.languages) {
             try {
-                const newLang = await (prisma as any).Language.upsert({
+                const newLang = await prisma.language.upsert({
                     where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
                     update: {},
                     create: { name: lang.name, proficiency: lang.proficiency },
@@ -172,14 +321,13 @@ router.post('/', async (req: Request, res: Response) => {
                 currentY += 18;
                 if (exp.description) {
                     const bullets = exp.description
-                        .split('.')
+                        .split('\n')
                         .map((b) => b.trim())
-                        .filter((b) => b.length > 0)
-                        .map((b) => (b.endsWith('.') ? b : `${b}.`));
+                        .filter((b) => b.length > 0);
                     bullets.forEach((bullet) => {
-                        const bulletHeight = doc.heightOfString(`  • ${bullet}`, { width: pageWidth - 20 });
+                        const bulletHeight = doc.heightOfString(bullet, { width: pageWidth - 20 });
                         ensureSpace(bulletHeight + 8);
-                        doc.font('Helvetica').fontSize(10).text(`  • ${bullet}`, 60, currentY, { width: pageWidth - 20 });
+                        doc.font('Helvetica').fontSize(10).text(bullet, 60, currentY, { width: pageWidth - 20 });
                         currentY += bulletHeight + 8;
                     });
                 }
