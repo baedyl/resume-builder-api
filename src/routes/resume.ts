@@ -229,7 +229,7 @@ router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
         // Handle languages
         const processedLanguages = await Promise.all(
           resumeData.languages.map(async (lang) => {
-            return prisma.language.upsert({
+            return (prisma as any).Language.upsert({
               where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
               update: {},
               create: { name: lang.name, proficiency: lang.proficiency },
