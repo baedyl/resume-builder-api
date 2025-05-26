@@ -3,6 +3,7 @@ import { Request, Response, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import OpenAI from 'openai';
+import { ensureAuthenticated } from '../middleware/auth';
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -73,9 +74,6 @@ const EnhanceSummarySchema = z.object({
 });
 
 let genericDescription = "";
-
-type Skill = z.infer<typeof SkillSchema>;
-type Language = z.infer<typeof LanguageSchema>;
 
 // Fallback enhancement function
 const generateFallbackEnhancement = (jobTitle: string, description: string): string => {
@@ -209,46 +207,81 @@ router.post('/enhance-description', async (req: Request, res: Response) => {
 });
 
 // POST /api/resumes
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
     try {
         console.log('Request body:', JSON.stringify(req.body, null, 2));
-        const resume = ResumeSchema.parse(req.body);
-        console.log('Parsed resume:', JSON.stringify(resume, null, 2));
-
-        // Handle custom skills (negative IDs)
-        const processedSkills: Skill[] = [];
-        for (const skill of resume.skills) {
-            try {
-                const newSkill = await prisma.skill.upsert({
-                    where: { name: skill.name },
-                    update: {},
-                    create: { name: skill.name },
-                });
-                processedSkills.push(newSkill);
-            } catch (error) {
-                console.error(`Failed to upsert skill: ${skill.name}`, error);
-                throw new Error('Failed to process skills');
-            }
-        }
-        resume.skills = processedSkills;
-
+        const resumeData = ResumeSchema.parse(req.body);
+        const userId = (req.user as any).id; // Type assertion since req.user is added by Passport
+        console.log('Parsed resume:', JSON.stringify(resumeData, null, 2));
+    
+        // Handle custom skills
+        const processedSkills = await Promise.all(
+          resumeData.skills.map(async (skill) => {
+            return prisma.skill.upsert({
+              where: { name: skill.name },
+              update: {},
+              create: { name: skill.name },
+            });
+          })
+        );
+        resumeData.skills = processedSkills;
+    
         // Handle languages
-        const processedLanguages: Language[] = [];
-        for (const lang of resume.languages) {
-            try {
-                const newLang = await (prisma as any).Language.upsert({
-                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-                    update: {},
-                    create: { name: lang.name, proficiency: lang.proficiency },
-                });
-                processedLanguages.push({ name: newLang.name, proficiency: newLang.proficiency });
-            } catch (error) {
-                console.error(`Failed to upsert language: ${lang.name}, ${lang.proficiency}`, error);
-                throw new Error('Failed to process languages');
-            }
-        }
-        resume.languages = processedLanguages;
-
+        const processedLanguages = await Promise.all(
+          resumeData.languages.map(async (lang) => {
+            return prisma.language.upsert({
+              where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
+              update: {},
+              create: { name: lang.name, proficiency: lang.proficiency },
+            });
+          })
+        );
+        resumeData.languages = processedLanguages;
+    
+        // Save resume to database with userId
+        await prisma.resume.create({
+          data: {
+            userId,
+            fullName: resumeData.fullName,
+            email: resumeData.email,
+            phone: resumeData.phone,
+            address: resumeData.address,
+            linkedIn: resumeData.linkedIn,
+            website: resumeData.website,
+            summary: resumeData.summary,
+            skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
+            languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
+            workExperiences: {
+              create: resumeData.workExperience.map((exp) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: new Date(exp.startDate),
+                endDate: exp.endDate ? new Date(exp.endDate) : null,
+                description: exp.description,
+              })),
+            },
+            educations: {
+              create: resumeData.education.map((edu) => ({
+                degree: edu.degree,
+                major: edu.major,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                gpa: edu.gpa,
+                description: edu.description,
+              })),
+            },
+            certifications: {
+              create: resumeData.certifications.map((cert) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+              })),
+            },
+          },
+        });
+    
+        // Generate PDF
         const doc = new PDFDocument({ margin: 50 });
         let buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
@@ -273,17 +306,17 @@ router.post('/', async (req: Request, res: Response) => {
         };
 
         // Centered User Info Header
-        doc.font('Helvetica-Bold').fontSize(18).text(resume.fullName, 50, currentY, { align: 'center' });
+        doc.font('Helvetica-Bold').fontSize(18).text(resumeData.fullName, 50, currentY, { align: 'center' });
         currentY += 24;
-        if (resume.website) {
+        if (resumeData.website) {
             ensureSpace(16);
-            doc.font('Helvetica').fontSize(12).text(resume.website, 50, currentY, { align: 'center' });
+            doc.font('Helvetica').fontSize(12).text(resumeData.website, 50, currentY, { align: 'center' });
             currentY += 16;
         }
         const contactParts = [];
-        if (resume.address) contactParts.push(resume.address);
-        if (resume.phone) contactParts.push(resume.phone);
-        if (resume.email) contactParts.push(resume.email);
+        if (resumeData.address) contactParts.push(resumeData.address);
+        if (resumeData.phone) contactParts.push(resumeData.phone);
+        if (resumeData.email) contactParts.push(resumeData.email);
         if (contactParts.length > 0) {
             ensureSpace(16);
             doc.font('Helvetica').fontSize(12).text(contactParts.join(' | '), 50, currentY, { align: 'center' });
@@ -294,22 +327,22 @@ router.post('/', async (req: Request, res: Response) => {
         doc.moveTo(50, currentY).lineTo(pageWidth + 50, currentY).stroke();
         currentY += 20;
 
-        if (resume.summary) {
+        if (resumeData.summary) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Summary', 50, currentY);
             currentY += 14;
             doc.font('Helvetica').fontSize(10);
-            const summaryHeight = doc.heightOfString(resume.summary, { width: pageWidth });
+            const summaryHeight = doc.heightOfString(resumeData.summary, { width: pageWidth });
             ensureSpace(summaryHeight);
-            doc.text(resume.summary, 50, currentY, { width: pageWidth });
+            doc.text(resumeData.summary, 50, currentY, { width: pageWidth });
             currentY += summaryHeight + 16;
         }
 
-        if (resume.workExperience.length > 0) {
+        if (resumeData.workExperience.length > 0) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Work Experience', 50, currentY);
             currentY += 14;
-            resume.workExperience.forEach((exp) => {
+            resumeData.workExperience.forEach((exp) => {
                 ensureSpace(48);
                 doc.font('Helvetica-Bold').fontSize(10).text(`${exp.jobTitle} | `, 50, currentY, { continued: true });
                 doc.font('Helvetica').text(`${exp.company}${exp.location ? `, ${exp.location}` : ''}`, { continued: true });
@@ -336,11 +369,11 @@ router.post('/', async (req: Request, res: Response) => {
             currentY += 16;
         }
 
-        if (resume.skills.length > 0) {
+        if (resumeData.skills.length > 0) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Skills', 50, currentY);
             currentY += 14;
-            resume.skills.forEach((skill) => {
+            resumeData.skills.forEach((skill) => {
                 ensureSpace(16);
                 doc.font('Helvetica').fontSize(10).text(`• ${skill.name}`, 60, currentY);
                 currentY += 16;
@@ -348,11 +381,11 @@ router.post('/', async (req: Request, res: Response) => {
             currentY += 16;
         }
 
-        if (resume.languages.length > 0) {
+        if (resumeData.languages.length > 0) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Languages', 50, currentY);
             currentY += 14;
-            resume.languages.forEach((lang) => {
+            resumeData.languages.forEach((lang) => {
                 ensureSpace(16);
                 doc.font('Helvetica-Bold').fontSize(10).text(`${lang.name} – `, 60, currentY, { continued: true });
                 doc.font('Helvetica').text(lang.proficiency);
@@ -361,11 +394,11 @@ router.post('/', async (req: Request, res: Response) => {
             currentY += 16;
         }
 
-        if (resume.certifications.length > 0) {
+        if (resumeData.certifications.length > 0) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Certifications', 50, currentY);
             currentY += 14;
-            resume.certifications.forEach((cert) => {
+            resumeData.certifications.forEach((cert) => {
                 ensureSpace(16);
                 doc.font('Helvetica').fontSize(10).text(`${cert.name} – ${cert.issuer}${cert.issueDate ? ` | ${new Date(cert.issueDate).getFullYear()}` : ''}`, 50, currentY);
                 currentY += 16;
@@ -373,11 +406,11 @@ router.post('/', async (req: Request, res: Response) => {
             currentY += 16;
         }
 
-        if (resume.education.length > 0) {
+        if (resumeData.education.length > 0) {
             ensureSpace(36);
             doc.font('Helvetica-Bold').fontSize(12).text('Education', 50, currentY);
             currentY += 14;
-            resume.education.forEach((edu) => {
+            resumeData.education.forEach((edu) => {
                 ensureSpace(16);
                 doc.font('Helvetica-Bold').fontSize(10).text(`${edu.degree}${edu.major ? `, ${edu.major}` : ''} – `, 50, currentY, { continued: true });
                 doc.font('Helvetica').text(`${edu.institution}${edu.graduationYear ? ` | ` : ''}`, { continued: true });
