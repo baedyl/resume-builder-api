@@ -8,6 +8,13 @@ import { ensureAuthenticated } from '../middleware/auth';
 const prisma = new PrismaClient();
 const router = Router();
 
+interface CustomRequest extends Request {
+    user?: {
+        sub: string;
+        // Add other properties if your token includes more fields
+    };
+}
+
 // Initialize OpenRouter API client
 const openrouter = new OpenAI({
     apiKey: process.env.OPENROUTER_API_KEY,
@@ -50,6 +57,7 @@ const CertificationSchema = z.object({
 });
 
 const ResumeSchema = z.object({
+    id: z.string().optional(),
     fullName: z.string().min(1, 'Full name is required'),
     email: z.string().email('Invalid email'),
     phone: z.string().optional(),
@@ -207,81 +215,87 @@ router.post('/enhance-description', async (req: Request, res: Response) => {
 });
 
 // POST /api/resumes
-router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
+router.post('/', ensureAuthenticated, async (req: CustomRequest, res: Response) => {
     try {
+        // Extract userId from the authenticated token (e.g., 'auth0|12345')
+        const userId = req.user?.sub; // Requires token validation middleware
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
         console.log('Request body:', JSON.stringify(req.body, null, 2));
         const resumeData = ResumeSchema.parse(req.body);
-        const userId = (req.user as any).id; // Type assertion since req.user is added by Passport
         console.log('Parsed resume:', JSON.stringify(resumeData, null, 2));
-    
+
         // Handle custom skills
         const processedSkills = await Promise.all(
-          resumeData.skills.map(async (skill) => {
-            return prisma.skill.upsert({
-              where: { name: skill.name },
-              update: {},
-              create: { name: skill.name },
-            });
-          })
+            resumeData.skills.map(async (skill) => {
+                return prisma.skill.upsert({
+                    where: { name: skill.name },
+                    update: {},
+                    create: { name: skill.name },
+                });
+            })
         );
         resumeData.skills = processedSkills;
-    
-        // Handle languages
+
+        // Handle languages (fixed typo: 'Language' should not be cast as 'any')
         const processedLanguages = await Promise.all(
-          resumeData.languages.map(async (lang) => {
-            return (prisma as any).Language.upsert({
-              where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-              update: {},
-              create: { name: lang.name, proficiency: lang.proficiency },
-            });
-          })
+            resumeData.languages.map(async (lang) => {
+                return prisma.language.upsert({
+                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
+                    update: {},
+                    create: { name: lang.name, proficiency: lang.proficiency },
+                });
+            })
         );
         resumeData.languages = processedLanguages;
-    
-        // Save resume to database with userId
+
+        // Save resume to database with userId from token
         await prisma.resume.create({
-          data: {
-            userId,
-            fullName: resumeData.fullName,
-            email: resumeData.email,
-            phone: resumeData.phone,
-            address: resumeData.address,
-            linkedIn: resumeData.linkedIn,
-            website: resumeData.website,
-            summary: resumeData.summary,
-            skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
-            languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
-            workExperiences: {
-              create: resumeData.workExperience.map((exp) => ({
-                jobTitle: exp.jobTitle,
-                company: exp.company,
-                location: exp.location,
-                startDate: new Date(exp.startDate),
-                endDate: exp.endDate ? new Date(exp.endDate) : null,
-                description: exp.description,
-              })),
+            data: {
+                userId, // Use the secure userId from the token
+                fullName: resumeData.fullName,
+                email: resumeData.email,
+                phone: resumeData.phone,
+                address: resumeData.address,
+                linkedIn: resumeData.linkedIn,
+                website: resumeData.website,
+                summary: resumeData.summary,
+                skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
+                languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
+                workExperiences: {
+                    create: resumeData.workExperience.map((exp) => ({
+                        jobTitle: exp.jobTitle,
+                        company: exp.company,
+                        location: exp.location,
+                        startDate: new Date(exp.startDate),
+                        endDate: exp.endDate ? new Date(exp.endDate) : null,
+                        description: exp.description,
+                    })),
+                },
+                educations: {
+                    create: resumeData.education.map((edu) => ({
+                        degree: edu.degree,
+                        major: edu.major,
+                        institution: edu.institution,
+                        graduationYear: edu.graduationYear,
+                        gpa: edu.gpa,
+                        description: edu.description,
+                    })),
+                },
+                certifications: {
+                    create: resumeData.certifications.map((cert) => ({
+                        name: cert.name,
+                        issuer: cert.issuer,
+                        issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                    })),
+                },
             },
-            educations: {
-              create: resumeData.education.map((edu) => ({
-                degree: edu.degree,
-                major: edu.major,
-                institution: edu.institution,
-                graduationYear: edu.graduationYear,
-                gpa: edu.gpa,
-                description: edu.description,
-              })),
-            },
-            certifications: {
-              create: resumeData.certifications.map((cert) => ({
-                name: cert.name,
-                issuer: cert.issuer,
-                issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-              })),
-            },
-          },
         });
-    
-        // Generate PDF
+
+        // Generate PDF (your existing PDF generation code remains unchanged)
         const doc = new PDFDocument({ margin: 50 });
         let buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
@@ -294,7 +308,7 @@ router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
             res.send(pdfData);
         });
 
-        const pageWidth = doc.page.width - 100; // Account for margins
+        const pageWidth = doc.page.width - 100;
         const pageHeight = doc.page.height - 100;
         let currentY = 50;
 
@@ -305,7 +319,6 @@ router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
             }
         };
 
-        // Centered User Info Header
         doc.font('Helvetica-Bold').fontSize(18).text(resumeData.fullName, 50, currentY, { align: 'center' });
         currentY += 24;
         if (resumeData.website) {
@@ -322,7 +335,6 @@ router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
             doc.font('Helvetica').fontSize(12).text(contactParts.join(' | '), 50, currentY, { align: 'center' });
             currentY += 16;
         }
-        // Add horizontal line
         ensureSpace(20);
         doc.moveTo(50, currentY).lineTo(pageWidth + 50, currentY).stroke();
         currentY += 20;
@@ -347,8 +359,7 @@ router.post('/', ensureAuthenticated, async (req: Request, res: Response) => {
                 doc.font('Helvetica-Bold').fontSize(10).text(`${exp.jobTitle} | `, 50, currentY, { continued: true });
                 doc.font('Helvetica').text(`${exp.company}${exp.location ? `, ${exp.location}` : ''}`, { continued: true });
                 doc.font('Helvetica-Bold').text(
-                    ` ${new Date(exp.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })} – ${exp.endDate ? new Date(exp.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' }) : 'Present'
-                    }`,
+                    ` ${new Date(exp.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })} – ${exp.endDate ? new Date(exp.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' }) : 'Present'}`,
                     { align: 'right' }
                 );
                 currentY += 18;
