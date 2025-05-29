@@ -1,5 +1,8 @@
-declare module 'express-serve-static-core' {
+declare namespace Express {
     interface Request {
-        user?: any; // Replace 'any' with a specific type if you know the token payload structure
+      user?: {
+        sub: string;
+        // Add other properties if your user object has more fields
+      };
     }
-}
+  }

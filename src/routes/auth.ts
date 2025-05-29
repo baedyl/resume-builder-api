@@ -1,74 +1,47 @@
-import { Router } from 'express';
-import passport from 'passport';
-import { Strategy as LocalStrategy } from 'passport-local';
-import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
 
-const prisma = new PrismaClient();
-const router = Router();
-
-// Configure Passport local strategy
-passport.use(
-    new LocalStrategy({ usernameField: 'email' }, async (email: string, password: string, done) => {
-        try {
-            const user = await prisma.user.findUnique({ where: { email } });
-            if (!user) {
-                return done(null, false, { message: 'No user found' });
-            }
-            const isMatch = await bcrypt.compare(password, user.password || '');
-            if (isMatch) {
-                return done(null, user);
-            } else {
-                return done(null, false, { message: 'Incorrect password' });
-            }
-        } catch (err) {
-            return done(err);
-        }
-    })
-);
-
-// Serialize and deserialize user for session management
-passport.serializeUser((user: any, done) => {
-    done(null, user.id);
+// Initialize JWKS client
+const client = jwksClient({
+    jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`
 });
 
-passport.deserializeUser(async (id: number, done) => {
-    try {
-        const user = await prisma.user.findUnique({ where: { id } });
-        done(null, user);
-    } catch (err) {
-        done(err);
-    }
-});
-
-// Registration route
-router.post('/register', async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await prisma.user.create({
-            data: { email, password: hashedPassword },
-        });
-        res.status(201).json({ message: 'User registered' });
-    } catch (err) {
-        res.status(500).json({ error: 'Error registering user' });
-    }
-});
-
-// Login route
-router.post('/login', passport.authenticate('local'), (req, res) => {
-    res.json({ message: 'Logged in', user: req.user });
-});
-
-// Logout route
-router.get('/logout', (req, res) => {
-    req.logout((err) => {
+// Function to retrieve the signing key
+function getKey(header: any, callback: (err: Error | null, key: string | null) => void) {
+    client.getSigningKey(header.kid, (err, key) => {
         if (err) {
-            res.status(500).json({ error: 'Error logging out' });
+            console.error('Error getting signing key:', err);
+            callback(err, null); // Pass error to jwt.verify
         } else {
-            res.json({ message: 'Logged out' });
+            const signingKey = key.getPublicKey();
+            callback(null, signingKey);
         }
     });
-});
+}
 
-export default router;
+// Authentication middleware
+export const ensureAuthenticated = (req: Request, res: Response, next: NextFunction): void => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    // Verify token
+    jwt.verify(token, getKey, {
+        audience: process.env.AUTH0_AUDIENCE,
+        issuer: `https://${process.env.AUTH0_DOMAIN}/`,
+        algorithms: ['RS256']
+    }, (err: Error | null, decoded: any) => {
+        if (err) {
+            console.error('Token verification error:', err);
+            res.status(401).json({ error: 'Invalid token' });
+        } else {
+            req.user = decoded; // Attach decoded token payload to req.user
+            next();
+        }
+    });
+};
