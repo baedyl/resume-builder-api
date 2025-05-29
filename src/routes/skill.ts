@@ -1,29 +1,30 @@
-// resume-builder-api/src/routes/skill.ts
 import { Request, Response, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { asyncHandler } from '../utils/asyncHandler'; // Adjust the path based on your project structure
 
 const prisma = new PrismaClient();
 const router = Router();
 
 // GET /api/skills
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', asyncHandler(async (_req: Request, res: Response) => {
     console.log('Fetching skills at:', new Date().toISOString());
     try {
         const skills = await prisma.skill.findMany();
         console.log('Skills fetched:', skills);
-        return res.json(skills);
+        res.json(skills); // No 'return' here
     } catch (error) {
         console.error('Error fetching skills:', error);
-        return res.status(500).json({ error: 'Failed to fetch skills' });
+        res.status(500).json({ error: 'Failed to fetch skills' }); // No 'return' here
     }
-});
+}));
 
 // POST /api/skills
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', asyncHandler(async (req: Request, res: Response) => {
     try {
         const { name } = req.body as { name: string };
         if (!name) {
-            return res.status(400).json({ error: 'Skill name is required' });
+            res.status(400).json({ error: 'Skill name is required' });
+            return; // Keep 'return' for early exit
         }
         const skill = await prisma.skill.upsert({
             where: { name },
@@ -31,11 +32,11 @@ router.post('/', async (req: Request, res: Response) => {
             create: { name },
         });
         console.log('Skill created/updated:', skill);
-        return res.json(skill);
+        res.json(skill); // No 'return' here
     } catch (error) {
         console.error('Error creating skill:', error);
-        return res.status(500).json({ error: 'Failed to create skill' });
+        res.status(500).json({ error: 'Failed to create skill' }); // No 'return' here
     }
-});
+}));
 
 export default router;

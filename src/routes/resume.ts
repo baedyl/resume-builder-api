@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import OpenAI from 'openai';
 import { ensureAuthenticated } from '../middleware/auth';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const prisma = new PrismaClient();
 const router = Router();
@@ -11,7 +12,6 @@ const router = Router();
 interface CustomRequest extends Request {
     user?: {
         sub: string;
-        // Add other properties if your token includes more fields
     };
 }
 
@@ -94,7 +94,7 @@ const generateFallbackEnhancement = (jobTitle: string, description: string): str
     return defaultBullets.join('\n');
 };
 
-router.post('/enhance-summary', async (req: Request, res: Response) => {
+router.post('/enhance-summary', asyncHandler (async (req: Request, res: Response) => {
     try {
         // Parse and validate the request body
         const { summary } = EnhanceSummarySchema.parse(req.body);
@@ -154,10 +154,10 @@ Input summary: ${summary}
         }
         return res.status(500).json({ error: 'Failed to enhance summary' });
     }
-});
+}));
 
 // POST /api/resumes/enhance-description
-router.post('/enhance-description', async (req: Request, res: Response) => {
+router.post('/enhance-description', asyncHandler (async (req: Request, res: Response) => {
     try {
         const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
 
@@ -212,23 +212,20 @@ router.post('/enhance-description', async (req: Request, res: Response) => {
         }
         return res.status(500).json({ error: 'Failed to enhance description' });
     }
-});
+}));
 
 // POST /api/resumes
-router.post('/', ensureAuthenticated, async (req: CustomRequest, res: Response) => {
+router.post('/', ensureAuthenticated, asyncHandler (async (req: CustomRequest, res: Response) => {
     try {
-        // Extract userId from the authenticated token (e.g., 'auth0|12345')
-        const userId = req.user?.sub; // Requires token validation middleware
-
+        const userId = req.user?.sub;
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            res.status(401).json({ error: 'Unauthorized' });
+            return; // Keep 'return' for early exit
         }
-
         console.log('Request body:', JSON.stringify(req.body, null, 2));
         const resumeData = ResumeSchema.parse(req.body);
         console.log('Parsed resume:', JSON.stringify(resumeData, null, 2));
 
-        // Handle custom skills
         const processedSkills = await Promise.all(
             resumeData.skills.map(async (skill) => {
                 return prisma.skill.upsert({
@@ -240,7 +237,6 @@ router.post('/', ensureAuthenticated, async (req: CustomRequest, res: Response) 
         );
         resumeData.skills = processedSkills;
 
-        // Handle languages (fixed typo: 'Language' should not be cast as 'any')
         const processedLanguages = await Promise.all(
             resumeData.languages.map(async (lang) => {
                 return prisma.language.upsert({
@@ -252,10 +248,9 @@ router.post('/', ensureAuthenticated, async (req: CustomRequest, res: Response) 
         );
         resumeData.languages = processedLanguages;
 
-        // Save resume to database with userId from token
         await prisma.resume.create({
             data: {
-                userId, // Use the secure userId from the token
+                userId,
                 fullName: resumeData.fullName,
                 email: resumeData.email,
                 phone: resumeData.phone,
@@ -454,6 +449,6 @@ router.post('/', ensureAuthenticated, async (req: CustomRequest, res: Response) 
         }
         return res.status(500).json({ error: 'Failed to generate PDF' });
     }
-});
+}));
 
 export default router;
