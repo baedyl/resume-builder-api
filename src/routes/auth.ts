@@ -28,7 +28,7 @@ const getKey = (header: jwt.JwtHeader, callback: jwt.SigningKeyCallback): void =
 
 // Middleware
 export const ensureAuthenticated = (
-  req: CustomRequest,
+  req: any,
   res: Response,
   next: NextFunction
 ): void => {

@@ -19,7 +19,7 @@ router.get('/', asyncHandler(async (_req: Request, res: Response) => {
 }));
 
 // POST /api/skills
-router.post('/', asyncHandler(async (req: Request, res: Response) => {
+router.post('/', asyncHandler(async (req: any, res) => {
     try {
         const { name } = req.body as { name: string };
         if (!name) {
