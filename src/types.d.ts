@@ -1,8 +1,6 @@
 // src/types.d.ts
 declare module 'express' {
     interface Request {
-        user?: {
-            sub: string;
-        };
+        user?: any;
     }
 }

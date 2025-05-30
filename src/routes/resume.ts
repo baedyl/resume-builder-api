@@ -1,5 +1,5 @@
+import express from 'express';
 import PDFDocument from 'pdfkit';
-import { Request, Response, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import OpenAI from 'openai';
@@ -7,13 +7,7 @@ import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const prisma = new PrismaClient();
-const router = Router();
-
-interface CustomRequest extends Request {
-    user?: {
-        sub: string;
-    };
-}
+const router = express.Router();
 
 // Initialize OpenRouter API client
 const openrouter = new OpenAI({
@@ -94,7 +88,7 @@ const generateFallbackEnhancement = (jobTitle: string, description: string): str
     return defaultBullets.join('\n');
 };
 
-router.post('/enhance-summary', asyncHandler (async (req: Request, res: Response) => {
+router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
     try {
         // Parse and validate the request body
         const { summary } = EnhanceSummarySchema.parse(req.body);
@@ -157,7 +151,7 @@ Input summary: ${summary}
 }));
 
 // POST /api/resumes/enhance-description
-router.post('/enhance-description', asyncHandler (async (req: Request, res: Response) => {
+router.post('/enhance-description', asyncHandler (async (req: any, res) => {
     try {
         const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
 
@@ -215,7 +209,7 @@ router.post('/enhance-description', asyncHandler (async (req: Request, res: Resp
 }));
 
 // POST /api/resumes
-router.post('/', ensureAuthenticated, asyncHandler (async (req: CustomRequest, res: Response) => {
+router.post('/', ensureAuthenticated, asyncHandler (async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {

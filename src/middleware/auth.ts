@@ -14,10 +14,7 @@ const client = jwksClient({
 
 // Define a custom Request interface to include the user property
 interface CustomRequest extends Request {
-    user?: {
-        sub: string;
-        // Add other properties if your token includes more fields
-    };
+    headers?: any;
 }
 
 // Function to retrieve the signing key
