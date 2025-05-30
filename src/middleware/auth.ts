@@ -12,11 +12,6 @@ const client = jwksClient({
     jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`,
 });
 
-// Define a custom Request interface to include the user property
-interface CustomRequest extends Request {
-    headers?: any;
-}
-
 // Function to retrieve the signing key
 const getKey: GetPublicKeyOrSecret = (header, callback) => {
     client.getSigningKey(header.kid, (err, key) => {
@@ -32,7 +27,7 @@ const getKey: GetPublicKeyOrSecret = (header, callback) => {
 
 // Authentication middleware
 export const ensureAuthenticated = (
-    req: CustomRequest,
+    req: any,
     res: Response,
     next: NextFunction
 ): void => {
