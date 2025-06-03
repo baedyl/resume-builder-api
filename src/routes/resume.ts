@@ -151,7 +151,7 @@ Input summary: ${summary}
 }));
 
 // POST /api/resumes/enhance-description
-router.post('/enhance-description', asyncHandler (async (req: any, res) => {
+router.post('/enhance-description', asyncHandler(async (req: any, res) => {
     try {
         const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
 
@@ -209,7 +209,7 @@ router.post('/enhance-description', asyncHandler (async (req: any, res) => {
 }));
 
 // POST /api/resumes
-router.post('/', ensureAuthenticated, asyncHandler (async (req: any, res) => {
+router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
@@ -284,7 +284,7 @@ router.post('/', ensureAuthenticated, asyncHandler (async (req: any, res) => {
             },
         });
 
-        // Generate PDF (your existing PDF generation code remains unchanged)
+        // Generate PDF
         const doc = new PDFDocument({ margin: 50 });
         let buffers: Buffer[] = [];
         doc.on('data', buffers.push.bind(buffers));
@@ -316,12 +316,13 @@ router.post('/', ensureAuthenticated, asyncHandler (async (req: any, res) => {
             currentY += 16;
         }
         const contactParts = [];
-        if (resumeData.address) contactParts.push(resumeData.address);
         if (resumeData.phone) contactParts.push(resumeData.phone);
+        if (resumeData.address) contactParts.push(resumeData.address);
         if (resumeData.email) contactParts.push(resumeData.email);
+        if (resumeData.linkedIn) contactParts.push(resumeData.linkedIn);
         if (contactParts.length > 0) {
             ensureSpace(16);
-            doc.font('Helvetica').fontSize(12).text(contactParts.join(' | '), 50, currentY, { align: 'center' });
+            doc.font('Helvetica').fontSize(10).text(contactParts.join(' | '), 50, currentY, { align: 'center' });
             currentY += 16;
         }
         ensureSpace(20);
