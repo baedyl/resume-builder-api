@@ -214,14 +214,17 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         const userId = req.user?.sub;
         if (!userId) {
             res.status(401).json({ error: 'Unauthorized' });
-            return; // Keep 'return' for early exit
+            return;
         }
         console.log('Request body:', JSON.stringify(req.body, null, 2));
-        const resumeData = ResumeSchema.parse(req.body);
-        console.log('Parsed resume:', JSON.stringify(resumeData, null, 2));
+        
+        // Extract template from request body, default to 'modern'
+        const { template = 'modern', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse(resumeData);
+        console.log('Parsed resume:', JSON.stringify(validatedData, null, 2));
 
         const processedSkills = await Promise.all(
-            resumeData.skills.map(async (skill) => {
+            validatedData.skills.map(async (skill) => {
                 return prisma.skill.upsert({
                     where: { name: skill.name },
                     update: {},
@@ -229,10 +232,10 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 });
             })
         );
-        resumeData.skills = processedSkills;
+        validatedData.skills = processedSkills;
 
         const processedLanguages = await Promise.all(
-            resumeData.languages.map(async (lang) => {
+            validatedData.languages.map(async (lang) => {
                 return prisma.language.upsert({
                     where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
                     update: {},
@@ -240,22 +243,23 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 });
             })
         );
-        resumeData.languages = processedLanguages;
+        validatedData.languages = processedLanguages;
 
+        // Create resume in database
         await prisma.resume.create({
             data: {
                 userId,
-                fullName: resumeData.fullName,
-                email: resumeData.email,
-                phone: resumeData.phone,
-                address: resumeData.address,
-                linkedIn: resumeData.linkedIn,
-                website: resumeData.website,
-                summary: resumeData.summary,
+                fullName: validatedData.fullName,
+                email: validatedData.email,
+                phone: validatedData.phone,
+                address: validatedData.address,
+                linkedIn: validatedData.linkedIn,
+                website: validatedData.website,
+                summary: validatedData.summary,
                 skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
                 languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
                 workExperiences: {
-                    create: resumeData.workExperience.map((exp) => ({
+                    create: validatedData.workExperience.map((exp) => ({
                         jobTitle: exp.jobTitle,
                         company: exp.company,
                         location: exp.location,
@@ -265,7 +269,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     })),
                 },
                 educations: {
-                    create: resumeData.education.map((edu) => ({
+                    create: validatedData.education.map((edu) => ({
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
@@ -275,7 +279,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     })),
                 },
                 certifications: {
-                    create: resumeData.certifications.map((cert) => ({
+                    create: validatedData.certifications.map((cert) => ({
                         name: cert.name,
                         issuer: cert.issuer,
                         issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
@@ -284,158 +288,20 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
             },
         });
 
-        // Generate PDF
-        const doc = new PDFDocument({ margin: 50 });
-        let buffers: Buffer[] = [];
-        doc.on('data', buffers.push.bind(buffers));
-        doc.on('end', () => {
-            const pdfData = Buffer.concat(buffers);
-            res.set({
-                'Content-Type': 'application/pdf',
-                'Content-Disposition': 'attachment; filename=resume.pdf',
-            });
-            res.send(pdfData);
+        // Generate PDF using template
+        const generateResume = require('../templates');
+        const doc = generateResume(validatedData, template);
+
+        // Set up response headers
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename=resume.pdf',
         });
 
-        const pageWidth = doc.page.width - 100;
-        const pageHeight = doc.page.height - 100;
-        let currentY = 50;
-
-        const ensureSpace = (requiredHeight: number) => {
-            if (currentY + requiredHeight > pageHeight) {
-                doc.addPage();
-                currentY = 50;
-            }
-        };
-
-        doc.font('Helvetica-Bold').fontSize(18).text(resumeData.fullName, 50, currentY, { align: 'center' });
-        currentY += 24;
-        if (resumeData.website) {
-            ensureSpace(16);
-            doc.font('Helvetica').fontSize(12).text(resumeData.website, 50, currentY, { align: 'center' });
-            currentY += 16;
-        }
-        const contactParts = [];
-        if (resumeData.phone) contactParts.push(resumeData.phone);
-        if (resumeData.address) contactParts.push(resumeData.address);
-        if (resumeData.email) contactParts.push(resumeData.email);
-        if (resumeData.linkedIn) contactParts.push(resumeData.linkedIn);
-        if (contactParts.length > 0) {
-            ensureSpace(16);
-            doc.font('Helvetica').fontSize(10).text(contactParts.join(' | '), 50, currentY, { align: 'center' });
-            currentY += 16;
-        }
-        ensureSpace(20);
-        doc.moveTo(50, currentY).lineTo(pageWidth + 50, currentY).stroke();
-        currentY += 20;
-
-        if (resumeData.summary) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Summary', 50, currentY);
-            currentY += 14;
-            doc.font('Helvetica').fontSize(10);
-            const summaryHeight = doc.heightOfString(resumeData.summary, { width: pageWidth });
-            ensureSpace(summaryHeight);
-            doc.text(resumeData.summary, 50, currentY, { width: pageWidth });
-            currentY += summaryHeight + 16;
-        }
-
-        if (resumeData.workExperience.length > 0) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Work Experience', 50, currentY);
-            currentY += 14;
-            resumeData.workExperience.forEach((exp) => {
-                ensureSpace(48);
-                doc.font('Helvetica-Bold').fontSize(10).text(`${exp.jobTitle} | `, 50, currentY, { continued: true });
-                doc.font('Helvetica').text(`${exp.company}${exp.location ? `, ${exp.location}` : ''}`, { continued: true });
-                doc.font('Helvetica-Bold').text(
-                    ` ${new Date(exp.startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })} – ${exp.endDate ? new Date(exp.endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short' }) : 'Present'}`,
-                    { align: 'right' }
-                );
-                currentY += 18;
-                if (exp.description) {
-                    const bullets = exp.description
-                        .split('\n')
-                        .map((b) => b.trim())
-                        .filter((b) => b.length > 0);
-                    bullets.forEach((bullet) => {
-                        const bulletHeight = doc.heightOfString(bullet, { width: pageWidth - 20 });
-                        ensureSpace(bulletHeight + 8);
-                        doc.font('Helvetica').fontSize(10).text(bullet, 60, currentY, { width: pageWidth - 20 });
-                        currentY += bulletHeight + 8;
-                    });
-                }
-                currentY += 12;
-            });
-            currentY += 16;
-        }
-
-        if (resumeData.skills.length > 0) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Skills', 50, currentY);
-            currentY += 14;
-            resumeData.skills.forEach((skill) => {
-                ensureSpace(16);
-                doc.font('Helvetica').fontSize(10).text(`• ${skill.name}`, 60, currentY);
-                currentY += 16;
-            });
-            currentY += 16;
-        }
-
-        if (resumeData.languages.length > 0) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Languages', 50, currentY);
-            currentY += 14;
-            resumeData.languages.forEach((lang) => {
-                ensureSpace(16);
-                doc.font('Helvetica-Bold').fontSize(10).text(`${lang.name} – `, 60, currentY, { continued: true });
-                doc.font('Helvetica').text(lang.proficiency);
-                currentY += 16;
-            });
-            currentY += 16;
-        }
-
-        if (resumeData.certifications.length > 0) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Certifications', 50, currentY);
-            currentY += 14;
-            resumeData.certifications.forEach((cert) => {
-                ensureSpace(16);
-                doc.font('Helvetica').fontSize(10).text(`${cert.name} – ${cert.issuer}${cert.issueDate ? ` | ${new Date(cert.issueDate).getFullYear()}` : ''}`, 50, currentY);
-                currentY += 16;
-            });
-            currentY += 16;
-        }
-
-        if (resumeData.education.length > 0) {
-            ensureSpace(36);
-            doc.font('Helvetica-Bold').fontSize(12).text('Education', 50, currentY);
-            currentY += 14;
-            resumeData.education.forEach((edu) => {
-                ensureSpace(16);
-                doc.font('Helvetica-Bold').fontSize(10).text(`${edu.degree}${edu.major ? `, ${edu.major}` : ''} – `, 50, currentY, { continued: true });
-                doc.font('Helvetica').text(`${edu.institution}${edu.graduationYear ? ` | ` : ''}`, { continued: true });
-                if (edu.graduationYear) {
-                    doc.font('Helvetica-Bold').text(`${edu.graduationYear}`);
-                }
-                if (edu.gpa) {
-                    currentY += 16;
-                    ensureSpace(16);
-                    doc.font('Helvetica').fontSize(10).text(`GPA: ${edu.gpa.toFixed(2)}`, 50, currentY);
-                }
-                if (edu.description) {
-                    currentY += 16;
-                    ensureSpace(16);
-                    doc.font('Helvetica').fontSize(10).text(edu.description, 50, currentY, { width: pageWidth });
-                    currentY += doc.heightOfString(edu.description, { width: pageWidth }) + 8;
-                } else {
-                    currentY += 16;
-                }
-            });
-            currentY += 16;
-        }
-
+        // Pipe the PDF directly to the response
+        doc.pipe(res);
         doc.end();
+
         return;
     } catch (error) {
         console.error('Error in resume endpoint:', error);
