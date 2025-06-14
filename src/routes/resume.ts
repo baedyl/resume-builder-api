@@ -312,4 +312,405 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     }
 }));
 
+// GET /api/resumes - List all resumes for the current user
+router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const resumes = await prisma.resume.findMany({
+            where: { userId },
+            select: {
+                id: true,
+                fullName: true,
+                email: true,
+                createdAt: true,
+                updatedAt: true,
+                workExperiences: {
+                    select: {
+                        jobTitle: true,
+                        company: true,
+                        startDate: true,
+                        endDate: true,
+                    },
+                    orderBy: { startDate: 'desc' },
+                    take: 1,
+                },
+            },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        return res.json(resumes);
+    } catch (error) {
+        console.error('Error fetching resumes:', error);
+        return res.status(500).json({ error: 'Failed to fetch resumes' });
+    }
+}));
+
+// GET /api/resumes/:id - Get a specific resume
+router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        const resume = await prisma.resume.findFirst({
+            where: {
+                id: resumeId,
+                userId,
+            },
+            include: {
+                skills: true,
+                languages: true,
+                workExperiences: {
+                    orderBy: { startDate: 'desc' },
+                },
+                educations: {
+                    orderBy: { graduationYear: 'desc' },
+                },
+                certifications: {
+                    orderBy: { issueDate: 'desc' },
+                },
+            },
+        });
+
+        if (!resume) {
+            return res.status(404).json({ error: 'Resume not found' });
+        }
+
+        // Transform the data to match the expected format
+        const transformedResume = {
+            id: resume.id,
+            fullName: resume.fullName,
+            email: resume.email,
+            phone: resume.phone,
+            address: resume.address,
+            linkedIn: resume.linkedIn,
+            website: resume.website,
+            summary: resume.summary,
+            skills: resume.skills,
+            languages: resume.languages,
+            workExperience: resume.workExperiences.map(exp => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: exp.startDate.toISOString(),
+                endDate: exp.endDate?.toISOString(),
+                description: exp.description,
+            })),
+            education: resume.educations.map(edu => ({
+                degree: edu.degree,
+                major: edu.major,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                gpa: edu.gpa,
+                description: edu.description,
+            })),
+            certifications: resume.certifications.map(cert => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate?.toISOString(),
+            })),
+            createdAt: resume.createdAt,
+            updatedAt: resume.updatedAt,
+        };
+
+        return res.json(transformedResume);
+    } catch (error) {
+        console.error('Error fetching resume:', error);
+        return res.status(500).json({ error: 'Failed to fetch resume' });
+    }
+}));
+
+// PUT /api/resumes/:id - Update a specific resume
+router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+        const { template = 'modern', ...resumeData } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        // Verify resume exists and belongs to user
+        const existingResume = await prisma.resume.findFirst({
+            where: {
+                id: resumeId,
+                userId,
+            },
+        });
+
+        if (!existingResume) {
+            return res.status(404).json({ error: 'Resume not found' });
+        }
+
+        const validatedData = ResumeSchema.parse(resumeData);
+
+        // Process skills and languages
+        const processedSkills = await Promise.all(
+            validatedData.skills.map(async (skill) => {
+                return prisma.skill.upsert({
+                    where: { name: skill.name },
+                    update: {},
+                    create: { name: skill.name },
+                });
+            })
+        );
+
+        const processedLanguages = await Promise.all(
+            validatedData.languages.map(async (lang) => {
+                return prisma.language.upsert({
+                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
+                    update: {},
+                    create: { name: lang.name, proficiency: lang.proficiency },
+                });
+            })
+        );
+
+        // Update resume using transaction to ensure data consistency
+        await prisma.$transaction(async (tx) => {
+            // Delete existing relations
+            await tx.workExperience.deleteMany({ where: { resumeId } });
+            await tx.education.deleteMany({ where: { resumeId } });
+            await tx.certification.deleteMany({ where: { resumeId } });
+            await tx.resume.update({
+                where: { id: resumeId },
+                data: {
+                    skills: { set: [] },
+                    languages: { set: [] },
+                },
+            });
+
+            // Update resume with new data
+            await tx.resume.update({
+                where: { id: resumeId },
+                data: {
+                    fullName: validatedData.fullName,
+                    email: validatedData.email,
+                    phone: validatedData.phone,
+                    address: validatedData.address,
+                    linkedIn: validatedData.linkedIn,
+                    website: validatedData.website,
+                    summary: validatedData.summary,
+                    skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
+                    languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
+                    workExperiences: {
+                        create: validatedData.workExperience.map((exp) => ({
+                            jobTitle: exp.jobTitle,
+                            company: exp.company,
+                            location: exp.location,
+                            startDate: new Date(exp.startDate),
+                            endDate: exp.endDate ? new Date(exp.endDate) : null,
+                            description: exp.description,
+                        })),
+                    },
+                    educations: {
+                        create: validatedData.education.map((edu) => ({
+                            degree: edu.degree,
+                            major: edu.major,
+                            institution: edu.institution,
+                            graduationYear: edu.graduationYear,
+                            gpa: edu.gpa,
+                            description: edu.description,
+                        })),
+                    },
+                    certifications: {
+                        create: validatedData.certifications.map((cert) => ({
+                            name: cert.name,
+                            issuer: cert.issuer,
+                            issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                        })),
+                    },
+                },
+            });
+        });
+
+        // Generate updated PDF
+        const generateResume = require('../templates');
+        const doc = generateResume(validatedData, template);
+
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename=resume.pdf',
+        });
+
+        doc.pipe(res);
+        doc.end();
+
+        return;
+    } catch (error) {
+        console.error('Error updating resume:', error);
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+        }
+        return res.status(500).json({ error: 'Failed to update resume' });
+    }
+}));
+
+// DELETE /api/resumes/:id - Delete a specific resume
+router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        // Verify resume exists and belongs to user
+        const existingResume = await prisma.resume.findFirst({
+            where: {
+                id: resumeId,
+                userId,
+            },
+        });
+
+        if (!existingResume) {
+            return res.status(404).json({ error: 'Resume not found' });
+        }
+
+        // Delete resume and all related data using transaction
+        await prisma.$transaction(async (tx) => {
+            // Delete all related records first
+            await tx.workExperience.deleteMany({ where: { resumeId } });
+            await tx.education.deleteMany({ where: { resumeId } });
+            await tx.certification.deleteMany({ where: { resumeId } });
+            
+            // Finally delete the resume
+            await tx.resume.delete({
+                where: { id: resumeId },
+            });
+        });
+
+        return res.status(204).send();
+    } catch (error) {
+        console.error('Error deleting resume:', error);
+        return res.status(500).json({ error: 'Failed to delete resume' });
+    }
+}));
+
+// POST /api/resumes/:id/pdf - Generate PDF for a specific resume
+router.post('/:id/pdf', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = req.params.id;
+        const { template = 'modern', ...resumeData } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        let validatedData;
+
+        if (resumeId === 'new') {
+            // For new resumes, validate the provided data
+            validatedData = ResumeSchema.parse(resumeData);
+        } else {
+            // For existing resumes, fetch from database
+            const parsedId = parseInt(resumeId, 10);
+            if (isNaN(parsedId)) {
+                return res.status(400).json({ error: 'Invalid resume ID' });
+            }
+
+            const existingResume = await prisma.resume.findFirst({
+                where: {
+                    id: parsedId,
+                    userId,
+                },
+                include: {
+                    skills: true,
+                    languages: true,
+                    workExperiences: {
+                        orderBy: { startDate: 'desc' },
+                    },
+                    educations: {
+                        orderBy: { graduationYear: 'desc' },
+                    },
+                    certifications: {
+                        orderBy: { issueDate: 'desc' },
+                    },
+                },
+            });
+
+            if (!existingResume) {
+                return res.status(404).json({ error: 'Resume not found' });
+            }
+
+            // Convert database model to the format expected by the template
+            validatedData = {
+                fullName: existingResume.fullName,
+                email: existingResume.email,
+                phone: existingResume.phone,
+                address: existingResume.address,
+                linkedIn: existingResume.linkedIn,
+                website: existingResume.website,
+                summary: existingResume.summary,
+                skills: existingResume.skills,
+                languages: existingResume.languages,
+                workExperience: existingResume.workExperiences.map(exp => ({
+                    jobTitle: exp.jobTitle,
+                    company: exp.company,
+                    location: exp.location,
+                    startDate: exp.startDate.toISOString(),
+                    endDate: exp.endDate?.toISOString(),
+                    description: exp.description,
+                })),
+                education: existingResume.educations.map(edu => ({
+                    degree: edu.degree,
+                    major: edu.major,
+                    institution: edu.institution,
+                    graduationYear: edu.graduationYear,
+                    gpa: edu.gpa,
+                    description: edu.description,
+                })),
+                certifications: existingResume.certifications.map(cert => ({
+                    name: cert.name,
+                    issuer: cert.issuer,
+                    issueDate: cert.issueDate?.toISOString(),
+                })),
+            };
+        }
+
+        // Generate PDF using template
+        const generateResume = require('../templates');
+        const doc = generateResume(validatedData, template);
+
+        // Set up response headers
+        res.set({
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': 'attachment; filename=resume.pdf',
+        });
+
+        // Pipe the PDF directly to the response
+        doc.pipe(res);
+        doc.end();
+
+        return;
+    } catch (error) {
+        console.error('Error generating PDF:', error);
+        if (error instanceof z.ZodError) {
+            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+        }
+        return res.status(500).json({ error: 'Failed to generate PDF' });
+    }
+}));
+
 export default router;

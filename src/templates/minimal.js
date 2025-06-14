@@ -2,11 +2,12 @@ const PDFDocument = require('pdfkit');
 
 function generateMinimalTemplate(data, doc) {
   // Set up fonts and colors
-  doc.font('Helvetica');
+  doc.font('Helvetica-Bold');
   doc.fontSize(20);
   doc.text(data.fullName, { align: 'left' });
   
   // Contact information
+  doc.font('Helvetica');
   doc.fontSize(9);
   const contactInfo = [
     data.email,
@@ -35,7 +36,9 @@ function generateMinimalTemplate(data, doc) {
   if (data.workExperience && data.workExperience.length > 0) {
     doc.moveDown();
     doc.fontSize(11);
+    doc.font('Helvetica-Bold');
     doc.text('Experience');
+    doc.font('Helvetica');
     
     data.workExperience.forEach(exp => {
       doc.moveDown(0.5);
@@ -61,12 +64,16 @@ function generateMinimalTemplate(data, doc) {
   if (data.education && data.education.length > 0) {
     doc.moveDown();
     doc.fontSize(11);
+    doc.font('Helvetica-Bold');
     doc.text('Education');
+    doc.font('Helvetica');
     
     data.education.forEach(edu => {
       doc.moveDown(0.5);
       doc.fontSize(10);
+      doc.font('Helvetica-Bold');
       doc.text(edu.degree);
+      doc.font('Helvetica');
       doc.fontSize(9);
       const eduDetails = [
         edu.institution,
@@ -81,7 +88,9 @@ function generateMinimalTemplate(data, doc) {
   if (data.languages && data.languages.length > 0) {
     doc.moveDown();
     doc.fontSize(11);
+    doc.font('Helvetica-Bold');
     doc.text('Languages');
+    doc.font('Helvetica');
     doc.fontSize(9);
     data.languages.forEach(lang => {
       doc.text(`${lang.name} - ${lang.proficiency}`);
@@ -92,8 +101,9 @@ function generateMinimalTemplate(data, doc) {
   if (data.certifications && data.certifications.length > 0) {
     doc.moveDown();
     doc.fontSize(11);
+    doc.font('Helvetica-Bold');
     doc.text('Certifications');
-    
+    doc.font('Helvetica');
     data.certifications.forEach(cert => {
       doc.moveDown(0.5);
       doc.fontSize(10);
