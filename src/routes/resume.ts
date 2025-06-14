@@ -9,10 +9,9 @@ import { asyncHandler } from '../utils/asyncHandler';
 const prisma = new PrismaClient();
 const router = express.Router();
 
-// Initialize OpenRouter API client
-const openrouter = new OpenAI({
-    apiKey: process.env.OPENROUTER_API_KEY,
-    baseURL: 'https://openrouter.ai/api/v1',
+// Initialize OpenAI client
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Zod schemas
@@ -93,7 +92,7 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
         // Parse and validate the request body
         const { summary } = EnhanceSummarySchema.parse(req.body);
 
-        // Define the prompt for OpenRouter API
+        // Define the prompt for ChatGPT
         const prompt = `
 You are an expert resume writer. Enhance the following professional summary to make it concise, impactful, and professional. Use strong language to highlight key strengths, experience, and career goals. Ensure the summary is ATS-friendly and suitable for a variety of roles. Return only the enhanced summary as a single paragraph.
 
@@ -107,8 +106,8 @@ Input summary: ${summary}
         // Retry logic for API call
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const response = await openrouter.chat.completions.create({
-                    model: 'deepseek/deepseek-r1',
+                const response = await openai.chat.completions.create({
+                    model: 'gpt-3.5-turbo',
                     messages: [
                         { role: 'system', content: 'You are a helpful assistant.' },
                         { role: 'user', content: prompt },
@@ -117,7 +116,7 @@ Input summary: ${summary}
                     max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
                 });
 
-                console.log(`OpenRouter response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
+                console.log(`OpenAI response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
 
                 const content = response.choices[0]?.message?.content?.trim();
                 if (content && content.length > 0) {
@@ -156,9 +155,9 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
         const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
 
         const prompt = `
-      You are an expert resume writer. Enhance the following job description for a ${jobTitle} role to make it professional, ATS-friendly, and impactful. Use strong action verbs, include quantifiable metrics where appropriate, and incorporate relevant keywords for the role. Format the output as bullet points starting with "• ". Each bullet should be concise and highlight key responsibilities or achievements. If the input is brief, expand it logically based on typical duties for the role. Return only the bullet-pointed (min 3 & max 4) text, no additional commentary.
+You are an expert resume writer. Enhance the following job description for a ${jobTitle} role to make it professional, ATS-friendly, and impactful. Use strong action verbs, include quantifiable metrics where appropriate, and incorporate relevant keywords for the role. Format the output as bullet points starting with "• ". Each bullet should be concise and highlight key responsibilities or achievements. If the input is brief, expand it logically based on typical duties for the role. Return only the bullet-pointed (min 3 & max 4) text, no additional commentary.
 
-      Input description: ${description}
+Input description: ${description}
     `;
 
         // Try API call with retries
@@ -166,8 +165,8 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
         const maxRetries = 2;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const response = await openrouter.chat.completions.create({
-                    model: 'deepseek/deepseek-r1',
+                const response = await openai.chat.completions.create({
+                    model: 'gpt-3.5-turbo',
                     messages: [
                         { role: 'system', content: 'You are a helpful assistant.' },
                         { role: 'user', content: prompt },
@@ -176,7 +175,7 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
                     max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
                 });
 
-                console.log(`OpenRouter response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
+                console.log(`OpenAI response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
 
                 const content = response.choices[0]?.message?.content?.trim();
                 if (content && content.includes('•')) {
