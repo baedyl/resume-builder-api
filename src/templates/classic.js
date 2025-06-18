@@ -1,14 +1,20 @@
 const PDFDocument = require('pdfkit');
 
 function generateClassicTemplate(data, doc) {
-  // Set up fonts and colors
-  doc.font('Times-Roman');
-  doc.fontSize(24);
-  doc.text(data.fullName, { align: 'center' });
+  // ATS-friendly: Use only black text for maximum compatibility
+  const textColor = '#000000';
+  
+  // Header
+  doc.font('Times-Bold')
+     .fontSize(24)
+     .fillColor(textColor)
+     .text(data.fullName, { align: 'center' });
   
   // Contact information
-  doc.font('Times-Roman');
-  doc.fontSize(10);
+  doc.font('Times-Roman')
+     .fontSize(11)
+     .fillColor(textColor);
+  
   const contactInfo = [
     data.email,
     data.phone,
@@ -16,120 +22,223 @@ function generateClassicTemplate(data, doc) {
     data.linkedIn,
     data.website
   ].filter(Boolean).join(' | ');
-  doc.text(contactInfo, { align: 'center' });
   
-  // Add a line separator
-  doc.moveDown(0.5);
-  doc.strokeColor('#000000');
-  doc.lineWidth(1);
-  doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
+  doc.text(contactInfo, { align: 'center' });
+  doc.moveDown(1);
+  
+  // ATS-friendly: Use simple line separator
+  doc.strokeColor(textColor)
+     .lineWidth(1)
+     .moveTo(50, doc.y)
+     .lineTo(545, doc.y)
+     .stroke();
+  doc.moveDown(1);
   
   // Summary
   if (data.summary) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('PROFESSIONAL SUMMARY');
-    doc.font('Times-Roman');
-    doc.fontSize(10);
-    doc.text(data.summary);
+    doc.font('Times-Bold')
+       .fontSize(12)
+       .fillColor(textColor)
+       .text('PROFESSIONAL SUMMARY');
+    
+    doc.moveDown(0.5);
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(data.summary, {
+         align: 'justify',
+         lineGap: 2
+       });
+    doc.moveDown(1);
   }
 
   // Skills
-  if (data.skills && data.skills.length > 0) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('SKILLS');
-    doc.font('Times-Roman');
-    doc.fontSize(10);
-    doc.text(data.skills.map(skill => skill.name).join(', '));
+  if (data.skills.length > 0) {
+    // Add separator before Skills section
+    doc.strokeColor(textColor)
+       .lineWidth(1)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Times-Bold')
+       .fontSize(12)
+       .fillColor(textColor)
+       .text('SKILLS');
+    
+    doc.moveDown(0.5);
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(data.skills.map(skill => skill.name).join(', '), {
+         lineGap: 2
+       });
+    doc.moveDown(1);
   }
 
   // Work Experience
-  if (data.workExperience && data.workExperience.length > 0) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('PROFESSIONAL EXPERIENCE');
+  // Add separator before Professional Experience section
+  doc.strokeColor(textColor)
+     .lineWidth(1)
+     .moveTo(50, doc.y)
+     .lineTo(545, doc.y)
+     .stroke();
+  doc.moveDown(1);
+  
+  doc.font('Times-Bold')
+     .fontSize(12)
+     .fillColor(textColor)
+     .text('PROFESSIONAL EXPERIENCE');
+  doc.moveDown(0.5);
+  
+  data.workExperience.forEach((exp, index) => {
+    if (index > 0) {
+      doc.moveDown(1);
+    }
+
+    doc.font('Times-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(exp.jobTitle);
     
-    data.workExperience.forEach(exp => {
-      doc.moveDown(0.5);
-      doc.font('Times-Bold');
-      doc.fontSize(11);
-      doc.text(exp.jobTitle);
-      doc.font('Times-Roman');
-      doc.fontSize(10);
-      doc.text(`${exp.company} | ${exp.startDate} - ${exp.endDate || 'Present'}`);
-      
-      if (exp.description) {
-        doc.moveDown(0.5);
-        const bullets = exp.description.split('\n');
-        bullets.forEach(bullet => {
-          doc.text(`• ${bullet.replace(/^•\s*/, '')}`, {
-            indent: 20,
-            continued: false
-          });
-        });
-      }
-    });
-  }
+    const companyAndDate = [
+      exp.company,
+      `${exp.startDate} - ${exp.endDate || 'Present'}`
+    ].filter(Boolean).join(' | ');
+    
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(companyAndDate);
+    
+    if (exp.location) {
+      doc.font('Times-Roman')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(exp.location);
+    }
+    
+    doc.moveDown(0.5);
+    
+    if (exp.description) {
+      doc.font('Times-Roman')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(exp.description, {
+           align: 'justify',
+           lineGap: 2
+         });
+    }
+  });
+
+  doc.moveDown(1);
 
   // Education
-  if (data.education && data.education.length > 0) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('EDUCATION');
+  // Add separator before Education section
+  doc.strokeColor(textColor)
+     .lineWidth(1)
+     .moveTo(50, doc.y)
+     .lineTo(545, doc.y)
+     .stroke();
+  doc.moveDown(1);
+  
+  doc.font('Times-Bold')
+     .fontSize(12)
+     .fillColor(textColor)
+     .text('EDUCATION');
+  doc.moveDown(0.5);
+  
+  data.education.forEach((edu, index) => {
+    if (index > 0) {
+      doc.moveDown(1);
+    }
+
+    doc.font('Times-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(edu.degree);
     
-    data.education.forEach(edu => {
+    const educationDetails = [
+      edu.institution,
+      edu.major,
+      edu.graduationYear,
+      edu.gpa ? `GPA: ${edu.gpa}` : null
+    ].filter(Boolean).join(' | ');
+    
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(educationDetails);
+    
+    if (edu.description) {
       doc.moveDown(0.5);
-      doc.font('Times-Bold');
-      doc.fontSize(11);
-      doc.text(edu.degree);
-      doc.font('Times-Roman');
-      doc.fontSize(10);
-      const eduDetails = [
-        edu.institution,
-        edu.major,
-        edu.graduationYear
-      ].filter(Boolean).join(' | ');
-      doc.text(eduDetails);
-    });
-  }
+      doc.font('Times-Roman')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(edu.description, {
+           align: 'justify',
+           lineGap: 2
+         });
+    }
+  });
 
   // Languages
-  if (data.languages && data.languages.length > 0) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('LANGUAGES');
-    doc.font('Times-Roman');
-    doc.fontSize(10);
+  if (data.languages.length > 0) {
+    doc.moveDown(1);
+    // Add separator before Languages section
+    doc.strokeColor(textColor)
+       .lineWidth(1)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Times-Bold')
+       .fontSize(12)
+       .fillColor(textColor)
+       .text('LANGUAGES');
+    doc.moveDown(0.5);
+    
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor);
+    
     data.languages.forEach(lang => {
-      doc.text(`${lang.name} - ${lang.proficiency}`);
+      doc.text(`${lang.name} - ${lang.proficiency}`, {
+        lineGap: 2
+      });
     });
   }
 
   // Certifications
-  if (data.certifications && data.certifications.length > 0) {
-    doc.moveDown();
-    doc.font('Times-Bold');
-    doc.fontSize(12);
-    doc.text('CERTIFICATIONS');
+  if (data.certifications.length > 0) {
+    doc.moveDown(1);
+    doc.font('Times-Bold')
+       .fontSize(12)
+       .fillColor(textColor)
+       .text('CERTIFICATIONS');
+    doc.moveDown(0.5);
     
-    data.certifications.forEach(cert => {
-      doc.moveDown(0.5);
-      doc.font('Times-Bold');
-      doc.fontSize(11);
-      doc.text(cert.name);
-      doc.font('Times-Roman');
-      doc.fontSize(10);
+    data.certifications.forEach((cert, index) => {
+      if (index > 0) {
+        doc.moveDown(1);
+      }
+
+      doc.font('Times-Bold')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(cert.name);
+      
       const certDetails = [
         cert.issuer,
         cert.issueDate
       ].filter(Boolean).join(' | ');
-      doc.text(certDetails);
+      
+      doc.font('Times-Roman')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(certDetails);
     });
   }
 }

@@ -1,14 +1,20 @@
 const PDFDocument = require('pdfkit');
 
 function generateMinimalTemplate(data, doc) {
-  // Set up fonts and colors
-  doc.font('Helvetica-Bold');
-  doc.fontSize(20);
-  doc.text(data.fullName, { align: 'left' });
+  // ATS-friendly: Use only black text for maximum compatibility
+  const textColor = '#000000';
+  
+  // Header
+  doc.font('Helvetica-Bold')
+     .fontSize(20)
+     .fillColor(textColor)
+     .text(data.fullName, { align: 'left' });
   
   // Contact information
-  doc.font('Helvetica');
-  doc.fontSize(9);
+  doc.font('Helvetica')
+     .fontSize(11)
+     .fillColor(textColor);
+  
   const contactInfo = [
     data.email,
     data.phone,
@@ -16,104 +22,203 @@ function generateMinimalTemplate(data, doc) {
     data.linkedIn,
     data.website
   ].filter(Boolean).join(' | ');
+  
   doc.text(contactInfo);
+  doc.moveDown(1);
   
   // Summary
   if (data.summary) {
-    doc.moveDown();
-    doc.fontSize(10);
-    doc.text(data.summary);
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(data.summary, {
+         align: 'justify',
+         lineGap: 2
+       });
+    doc.moveDown(1);
   }
 
   // Skills
-  if (data.skills && data.skills.length > 0) {
-    doc.moveDown();
-    doc.fontSize(10);
-    doc.text('Skills: ' + data.skills.map(skill => skill.name).join(', '));
+  if (data.skills.length > 0) {
+    // Add separator before Skills section
+    doc.strokeColor(textColor)
+       .lineWidth(0.5)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text('Skills: ' + data.skills.map(skill => skill.name).join(', '), {
+         lineGap: 2
+       });
+    doc.moveDown(1);
   }
 
   // Work Experience
-  if (data.workExperience && data.workExperience.length > 0) {
-    doc.moveDown();
-    doc.fontSize(11);
-    doc.font('Helvetica-Bold');
-    doc.text('Experience');
-    doc.font('Helvetica');
+  // Add separator before Experience section
+  doc.strokeColor(textColor)
+     .lineWidth(0.5)
+     .moveTo(50, doc.y)
+     .lineTo(545, doc.y)
+     .stroke();
+  doc.moveDown(1);
+  
+  doc.font('Helvetica-Bold')
+     .fontSize(11)
+     .fillColor(textColor)
+     .text('EXPERIENCE');
+  doc.moveDown(0.5);
+  doc.font('Helvetica');
+  
+  data.workExperience.forEach((exp, index) => {
+    if (index > 0) {
+      doc.moveDown(1);
+    }
+
+    doc.font('Helvetica-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(exp.jobTitle);
     
-    data.workExperience.forEach(exp => {
-      doc.moveDown(0.5);
-      doc.fontSize(10);
-      doc.text(`${exp.jobTitle} at ${exp.company}`);
-      doc.fontSize(9);
-      doc.text(`${exp.startDate} - ${exp.endDate || 'Present'}`);
-      
-      if (exp.description) {
-        doc.moveDown(0.5);
-        const bullets = exp.description.split('\n');
-        bullets.forEach(bullet => {
-          doc.text(`• ${bullet.replace(/^•\s*/, '')}`, {
-            indent: 20,
-            continued: false
-          });
-        });
-      }
-    });
-  }
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(exp.company);
+    
+    const dateAndLocation = [
+      `${exp.startDate} - ${exp.endDate || 'Present'}`,
+      exp.location
+    ].filter(Boolean).join(' | ');
+    
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(dateAndLocation);
+    
+    doc.moveDown(0.5);
+    
+    if (exp.description) {
+      doc.font('Helvetica')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(exp.description, {
+           align: 'justify',
+           lineGap: 2
+         });
+    }
+  });
+
+  doc.moveDown(1);
 
   // Education
-  if (data.education && data.education.length > 0) {
-    doc.moveDown();
-    doc.fontSize(11);
-    doc.font('Helvetica-Bold');
-    doc.text('Education');
-    doc.font('Helvetica');
+  // Add separator before Education section
+  doc.strokeColor(textColor)
+     .lineWidth(0.5)
+     .moveTo(50, doc.y)
+     .lineTo(545, doc.y)
+     .stroke();
+  doc.moveDown(1);
+  
+  doc.font('Helvetica-Bold')
+     .fontSize(11)
+     .fillColor(textColor)
+     .text('EDUCATION');
+  doc.moveDown(0.5);
+  doc.font('Helvetica');
+  
+  data.education.forEach((edu, index) => {
+    if (index > 0) {
+      doc.moveDown(1);
+    }
+
+    doc.font('Helvetica-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(edu.degree);
     
-    data.education.forEach(edu => {
+    const educationDetails = [
+      edu.institution,
+      edu.major,
+      edu.graduationYear,
+      edu.gpa ? `GPA: ${edu.gpa}` : null
+    ].filter(Boolean).join(' | ');
+    
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(educationDetails);
+    
+    if (edu.description) {
       doc.moveDown(0.5);
-      doc.fontSize(10);
-      doc.font('Helvetica-Bold');
-      doc.text(edu.degree);
-      doc.font('Helvetica');
-      doc.fontSize(9);
-      const eduDetails = [
-        edu.institution,
-        edu.major,
-        edu.graduationYear
-      ].filter(Boolean).join(' | ');
-      doc.text(eduDetails);
-    });
-  }
+      doc.font('Helvetica')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(edu.description, {
+           align: 'justify',
+           lineGap: 2
+         });
+    }
+  });
 
   // Languages
-  if (data.languages && data.languages.length > 0) {
-    doc.moveDown();
-    doc.fontSize(11);
-    doc.font('Helvetica-Bold');
-    doc.text('Languages');
-    doc.font('Helvetica');
-    doc.fontSize(9);
+  if (data.languages.length > 0) {
+    doc.moveDown(1);
+    // Add separator before Languages section
+    doc.strokeColor(textColor)
+       .lineWidth(0.5)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Helvetica-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text('LANGUAGES');
+    doc.moveDown(0.5);
+    
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor);
+    
     data.languages.forEach(lang => {
-      doc.text(`${lang.name} - ${lang.proficiency}`);
+      doc.text(`${lang.name} - ${lang.proficiency}`, {
+        lineGap: 2
+      });
     });
   }
 
   // Certifications
-  if (data.certifications && data.certifications.length > 0) {
-    doc.moveDown();
-    doc.fontSize(11);
-    doc.font('Helvetica-Bold');
-    doc.text('Certifications');
-    doc.font('Helvetica');
-    data.certifications.forEach(cert => {
-      doc.moveDown(0.5);
-      doc.fontSize(10);
-      doc.text(cert.name);
-      doc.fontSize(9);
+  if (data.certifications.length > 0) {
+    doc.moveDown(1);
+    doc.font('Helvetica-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text('CERTIFICATIONS');
+    doc.moveDown(0.5);
+    
+    data.certifications.forEach((cert, index) => {
+      if (index > 0) {
+        doc.moveDown(1);
+      }
+
+      doc.font('Helvetica-Bold')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(cert.name);
+      
       const certDetails = [
         cert.issuer,
         cert.issueDate
       ].filter(Boolean).join(' | ');
-      doc.text(certDetails);
+      
+      doc.font('Helvetica')
+         .fontSize(11)
+         .fillColor(textColor)
+         .text(certDetails);
     });
   }
 }
