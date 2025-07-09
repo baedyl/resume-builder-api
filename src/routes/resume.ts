@@ -5,6 +5,10 @@ import { z } from 'zod';
 import OpenAI from 'openai';
 import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
+import multer, { FileFilterCallback } from 'multer';
+import type { Multer } from 'multer';
+import type { AxiosResponse } from 'axios';
+import axios from 'axios';
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -86,6 +90,25 @@ const generateFallbackEnhancement = (jobTitle: string, description: string): str
     genericDescription = description;
     return defaultBullets.join('\n');
 };
+
+// Multer setup for file uploads (max 5MB, allowed types)
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+    fileFilter: (req: express.Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+        const allowedTypes = [
+            'application/pdf',
+            'text/plain',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Only PDF, DOC, DOCX, and TXT are allowed.'));
+        }
+    },
+});
 
 router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
     try {
@@ -709,6 +732,156 @@ router.post('/:id/pdf', ensureAuthenticated, asyncHandler(async (req: any, res) 
             return res.status(400).json({ error: 'Invalid input', details: error.errors });
         }
         return res.status(500).json({ error: 'Failed to generate PDF' });
+    }
+}));
+
+// POST /api/resumes/upload
+router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+        // Validate file size (already handled by multer)
+        // Validate file type (already handled by multer)
+
+        // Step 1: Upload file to OpenAI
+        // @ts-ignore
+        const formData = new (require('form-data'))();
+        formData.append('file', req.file.buffer, {
+            filename: req.file.originalname,
+            contentType: req.file.mimetype,
+        });
+        formData.append('purpose', 'assistants');
+
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        const openaiAssistantId = process.env.OPENAI_ASSISTANT_ID;
+        if (!openaiApiKey || !openaiAssistantId) {
+            return res.status(500).json({ error: 'OpenAI API key or Assistant ID not configured' });
+        }
+
+        // Upload file
+        const uploadResponse = await axios.post('https://api.openai.com/v1/files', formData, {
+            headers: {
+                ...formData.getHeaders(),
+                'Authorization': `Bearer ${openaiApiKey}`,
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+        });
+        const fileId = uploadResponse.data.id;
+
+        // Step 2: Create a new thread
+        const threadResponse = await axios.post('https://api.openai.com/v1/threads', {}, {
+            headers: {
+                'Authorization': `Bearer ${openaiApiKey}`,
+                'OpenAI-Beta': 'assistants=v2',
+                'Content-Type': 'application/json',
+            },
+        });
+        const threadId = threadResponse.data.id;
+
+        // Step 3: Add message to thread with file attachment
+        const messageData = {
+            role: 'user',
+            content: 'Please extract key information from this CV and return it as JSON format with the following structure: { personal_info: { fullName, email, phone, address, linkedIn, website }, work_experience: [{ company, jobTitle, startDate, endDate, description }], education: [{ institution, degree, major, graduationYear }], skills: [{ id, name }], languages: [{ name, proficiency }], certifications: [{ name, issuer, issueDate (optional) }] }',
+            attachments: [
+                {
+                    file_id: fileId,
+                    tools: [{ type: 'file_search' }],
+                },
+            ],
+        };
+        await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, messageData, {
+            headers: {
+                'Authorization': `Bearer ${openaiApiKey}`,
+                'OpenAI-Beta': 'assistants=v2',
+                'Content-Type': 'application/json',
+            },
+        });
+
+        // Step 4: Create and run the assistant
+        const runData = { assistant_id: openaiAssistantId };
+        const runResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, runData, {
+            headers: {
+                'Authorization': `Bearer ${openaiApiKey}`,
+                'OpenAI-Beta': 'assistants=v2',
+                'Content-Type': 'application/json',
+            },
+        });
+        const runId = runResponse.data.id;
+
+        // Step 5: Poll for completion
+        let attempts = 0;
+        const maxAttempts = 30;
+        let status = '';
+        let lastError = null;
+        while (attempts < maxAttempts) {
+            const statusResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+                headers: {
+                    'Authorization': `Bearer ${openaiApiKey}`,
+                    'OpenAI-Beta': 'assistants=v2',
+                },
+            });
+            status = statusResponse.data.status;
+            if (status === 'completed') {
+                break;
+            } else if ([ 'failed', 'cancelled', 'expired' ].includes(status)) {
+                lastError = statusResponse.data.last_error?.message || 'Unknown error';
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
+        }
+        if (status !== 'completed') {
+            return res.status(500).json({ error: `Analysis failed with status: ${status}. Error: ${lastError}` });
+        }
+
+        // Step 6: Get the assistant's response
+        const messagesResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+            headers: {
+                'Authorization': `Bearer ${openaiApiKey}`,
+                'OpenAI-Beta': 'assistants=v2',
+            },
+        });
+        const messages = messagesResponse.data.data;
+        let extractedJson = null;
+        for (const message of messages) {
+            if (message.role === 'assistant') {
+                const content = message.content;
+                if (content && content.length > 0 && content[0].type === 'text') {
+                    const responseText = content[0].text.value;
+                    // Try to extract JSON from the response
+                    let jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        let jsonStr = jsonMatch[1] || jsonMatch[0];
+                        try {
+                            extractedJson = JSON.parse(jsonStr);
+                        } catch (e) {
+                            // Try to fix common JSON issues (e.g., trailing commas)
+                            try {
+                                extractedJson = JSON.parse(jsonStr.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
+                            } catch (e2) {
+                                extractedJson = null;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (!extractedJson) {
+            return res.status(500).json({ error: 'Failed to extract JSON from assistant response' });
+        }
+        return res.json({ extracted: extractedJson });
+    } catch (error: any) {
+        console.error('Error in file upload route:', error);
+        if (error instanceof multer.MulterError) {
+            return res.status(400).json({ error: error.message });
+        }
+        return res.status(500).json({ error: error.message || 'Failed to process file upload' });
     }
 }));
 
