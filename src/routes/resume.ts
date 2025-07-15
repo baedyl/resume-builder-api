@@ -95,7 +95,7 @@ const generateFallbackEnhancement = (jobTitle: string, description: string): str
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-    fileFilter: (req: express.Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+    fileFilter: (req, file, cb) => {
         const allowedTypes = [
             'application/pdf',
             'text/plain',
@@ -107,7 +107,7 @@ const upload = multer({
         } else {
             cb(new Error('Invalid file type. Only PDF, DOC, DOCX, and TXT are allowed.'));
         }
-    },
+    }
 });
 
 router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
@@ -281,7 +281,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
                 languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
                 workExperiences: {
-                    create: validatedData.workExperience.map((exp) => ({
+                    create: validatedData.workExperience.map((exp: any) => ({
                         jobTitle: exp.jobTitle,
                         company: exp.company,
                         location: exp.location,
@@ -291,7 +291,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     })),
                 },
                 educations: {
-                    create: validatedData.education.map((edu) => ({
+                    create: validatedData.education.map((edu: any) => ({
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
@@ -301,7 +301,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     })),
                 },
                 certifications: {
-                    create: validatedData.certifications.map((cert) => ({
+                    create: validatedData.certifications.map((cert: any) => ({
                         name: cert.name,
                         issuer: cert.issuer,
                         issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
@@ -504,7 +504,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         );
 
         // Update resume using transaction to ensure data consistency
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: any) => {
             // Delete existing relations
             await tx.workExperience.deleteMany({ where: { resumeId } });
             await tx.education.deleteMany({ where: { resumeId } });
@@ -531,7 +531,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
                     languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
                     workExperiences: {
-                        create: validatedData.workExperience.map((exp) => ({
+                        create: validatedData.workExperience.map((exp: any) => ({
                             jobTitle: exp.jobTitle,
                             company: exp.company,
                             location: exp.location,
@@ -541,7 +541,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                         })),
                     },
                     educations: {
-                        create: validatedData.education.map((edu) => ({
+                        create: validatedData.education.map((edu: any) => ({
                             degree: edu.degree,
                             major: edu.major,
                             institution: edu.institution,
@@ -551,7 +551,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                         })),
                     },
                     certifications: {
-                        create: validatedData.certifications.map((cert) => ({
+                        create: validatedData.certifications.map((cert: any) => ({
                             name: cert.name,
                             issuer: cert.issuer,
                             issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
@@ -610,7 +610,7 @@ router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) =>
         }
 
         // Delete resume and all related data using transaction
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: any) => {
             // Delete all related records first
             await tx.workExperience.deleteMany({ where: { resumeId } });
             await tx.education.deleteMany({ where: { resumeId } });

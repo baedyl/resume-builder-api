@@ -32,7 +32,7 @@
   "devDependencies": {
     "@types/axios": "^0.14.4",
     "@types/bcryptjs": "^3.0.0",
-    "@types/express": "^4.17.22",
+    "@types/express": "^5.0.3",
     "@types/express-serve-static-core": "^5.0.6",
     "@types/multer": "^2.0.0",
     "@types/node": "22.7.5",
