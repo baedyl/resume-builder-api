@@ -18,6 +18,13 @@ const JobCreateSchema = z.object({
     dateApplied: z.string().datetime().optional(),
     followUp: z.string().datetime().optional(),
     comment: z.string().optional(),
+    jobUrl: z.string().url().optional(),
+    description: z.string().optional(),
+    notes: z.string().optional(),
+    interviewDate: z.string().datetime().optional(),
+    contactPerson: z.string().optional(),
+    contactEmail: z.string().email().optional(),
+    contactPhone: z.string().optional(),
 });
 
 const JobUpdateSchema = z.object({
@@ -30,6 +37,13 @@ const JobUpdateSchema = z.object({
     dateApplied: z.string().datetime().optional(),
     followUp: z.string().datetime().optional(),
     comment: z.string().optional(),
+    jobUrl: z.string().url().optional(),
+    description: z.string().optional(),
+    notes: z.string().optional(),
+    interviewDate: z.string().datetime().optional(),
+    contactPerson: z.string().optional(),
+    contactEmail: z.string().email().optional(),
+    contactPhone: z.string().optional(),
 });
 
 // Helper function to parse date strings
@@ -63,7 +77,14 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         deadline,
         dateApplied,
         followUp,
-        comment
+        comment,
+        jobUrl,
+        description,
+        notes,
+        interviewDate,
+        contactPerson,
+        contactEmail,
+        contactPhone
     } = parsed;
 
     const job = await prisma.job.create({
@@ -78,6 +99,13 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
             dateApplied: parseDate(dateApplied),
             followUp: parseDate(followUp),
             comment,
+            jobUrl,
+            description,
+            notes,
+            interviewDate: parseDate(interviewDate),
+            contactPerson,
+            contactEmail,
+            contactPhone,
         },
     });
 
@@ -98,7 +126,7 @@ router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // GET /api/jobs/:id - Get a specific job application
-router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/get/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     const id = parseInt(req.params.id, 10);
 
@@ -140,6 +168,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     if (data.deadline !== undefined) updateData.deadline = parseDate(data.deadline);
     if (data.dateApplied !== undefined) updateData.dateApplied = parseDate(data.dateApplied);
     if (data.followUp !== undefined) updateData.followUp = parseDate(data.followUp);
+    if (data.interviewDate !== undefined) updateData.interviewDate = parseDate(data.interviewDate);
 
     const updated = await prisma.job.update({
         where: { id },
@@ -170,21 +199,37 @@ router.get('/stats/overview', ensureAuthenticated, asyncHandler(async (req: any,
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const [totalJobs, appliedJobs, interviewJobs, rejectedJobs, acceptedJobs] = await Promise.all([
+    const [totalJobs, appliedJobs, interviewJobs, rejectedJobs, acceptedJobs, withdrawnJobs, pendingJobs, followUpJobs] = await Promise.all([
         prisma.job.count({ where: { userId } }),
-        prisma.job.count({ where: { userId, status: 'Applied' } }),
-        prisma.job.count({ where: { userId, status: 'Interview' } }),
-        prisma.job.count({ where: { userId, status: 'Rejected' } }),
-        prisma.job.count({ where: { userId, status: 'Accepted' } }),
+        prisma.job.count({ where: { userId, status: 'applied' } }),
+        prisma.job.count({ where: { userId, status: 'interviewing' } }),
+        prisma.job.count({ where: { userId, status: 'rejected' } }),
+        prisma.job.count({ where: { userId, status: 'offer' } }),
+        prisma.job.count({ where: { userId, status: 'withdrawn' } }),
+        prisma.job.count({ where: { userId, status: 'pending' } }),
+        prisma.job.count({ where: { userId, status: 'follow-up' } }),
     ]);
+
+    // Rates
+    const responded = totalJobs > 0 ? interviewJobs + acceptedJobs + pendingJobs : 0;
+    const responseRate = totalJobs > 0 ? (responded / totalJobs) * 100 : 0;
+    const interviewRate = totalJobs > 0 ? ((interviewJobs + pendingJobs) / totalJobs) * 100 : 0;
+    const offerRate = totalJobs > 0 ? (acceptedJobs / totalJobs) * 100 : 0;
 
     const stats = {
         total: totalJobs,
         applied: appliedJobs,
-        interview: interviewJobs,
+        interviewing: interviewJobs,
         rejected: rejectedJobs,
-        accepted: acceptedJobs,
+        offer: acceptedJobs,
+        withdrawn: withdrawnJobs,
+        pending: pendingJobs,
+        followUp: followUpJobs,
+        responseRate,
+        interviewRate,
+        offerRate,
     };
+
 
     return res.json(stats);
 }));

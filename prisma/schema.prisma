@@ -96,17 +96,24 @@ model CoverLetter {
 }
 
 model Job {
-  id          Int       @id @default(autoincrement())
-  userId      String
-  position    String    // Required: Job Position
-  company     String    // Required: Company
-  location    String    // Required: Location
-  maxSalary   Float?    // Optional: Max salary
-  status      String?   // Optional: Application status (e.g., "Applied", "Interview", "Rejected", "Accepted")
-  deadline    DateTime? // Optional: Application deadline
-  dateApplied DateTime? // Optional: Date applied
-  followUp    DateTime? // Optional: Follow up date
-  comment     String?   // Optional: Additional comments
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            Int       @id @default(autoincrement())
+  userId        String
+  position      String    // Required: Job Position
+  company       String    // Required: Company
+  location      String    // Required: Location
+  maxSalary     Float?    // Optional: Max salary
+  status        String?   // Optional: Application status
+  deadline      DateTime? // Optional: Application deadline
+  dateApplied   DateTime? // Optional: Date applied
+  followUp      DateTime? // Optional: Follow up date
+  comment       String?   // Optional: Additional comments
+  jobUrl        String?   // Optional: Job posting URL
+  description   String?   // Optional: Job description
+  notes         String?   // Optional: Notes
+  interviewDate DateTime? // Optional: Interview date
+  contactPerson String?   // Optional: Contact person
+  contactEmail  String?   // Optional: Contact email
+  contactPhone  String?   // Optional: Contact phone
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
