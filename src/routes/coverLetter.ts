@@ -6,6 +6,7 @@ import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 import PDFDocument from 'pdfkit';
 import { detect } from 'langdetect';
+import { requirePremium } from '../middleware/subscription';
 // Remove langdetect import due to missing module; will handle language detection differently if needed
 
 const prisma = new PrismaClient();
@@ -32,7 +33,7 @@ const openai = new OpenAI({
 });
 
 // POST /api/cover-letter - Generate and save a new cover letter
-router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     let parsed;
@@ -109,7 +110,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // GET /api/cover-letter - List all cover letters for the current user
-router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
     const coverLetters = await prisma.coverLetter.findMany({
@@ -120,7 +121,7 @@ router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // GET /api/cover-letter/:id - Get a specific cover letter
-router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     const id = parseInt(req.params.id, 10);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -133,7 +134,7 @@ router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // PUT /api/cover-letter/:id - Update a specific cover letter
-router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.put('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     const id = parseInt(req.params.id, 10);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -157,7 +158,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // DELETE /api/cover-letter/:id - Delete a specific cover letter
-router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.delete('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     const id = parseInt(req.params.id, 10);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -169,7 +170,7 @@ router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) =>
 }));
 
 // POST /api/cover-letter/:id/pdf - Generate PDF for a specific cover letter
-router.post('/:id/pdf', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     const id = parseInt(req.params.id, 10);
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });

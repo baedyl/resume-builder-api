@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
+import { requirePremium } from '../middleware/subscription';
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -54,7 +55,7 @@ const parseDate = (dateString?: string): Date | undefined => {
 };
 
 // POST /api/jobs - Create a new job application
-router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -113,7 +114,7 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 }));
 
 // GET /api/jobs - List all job applications for the current user
-router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
