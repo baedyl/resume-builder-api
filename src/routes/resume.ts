@@ -1,59 +1,44 @@
 import express from 'express';
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import OpenAI from 'openai';
 import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 import multer, { FileFilterCallback } from 'multer';
 import type { Multer } from 'multer';
 import type { AxiosResponse } from 'axios';
 import axios from 'axios';
+
+// Import shared utilities and services
+import { prisma } from '../lib/database';
+import { openai } from '../lib/openai';
+import { 
+    WorkExperienceSchema, 
+    EducationSchema, 
+    SkillSchema, 
+    LanguageSchema, 
+    CertificationSchema 
+} from '../utils/validation';
+import { detectLanguage } from '../utils/language';
+import { enhanceWithOpenAI } from '../utils/openai';
+import { 
+    handleValidationError, 
+    handleDatabaseError, 
+    handleUnauthorized, 
+    handleNotFound 
+} from '../utils/errorHandling';
+import { 
+    createResume, 
+    getResumeById, 
+    getUserResumes, 
+    processSkills, 
+    processLanguages,
+    type ResumeData 
+} from '../services/resumeService';
 import { requirePremium } from '../middleware/subscription';
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Zod schemas
-const WorkExperienceSchema = z.object({
-    jobTitle: z.string().min(1, 'Job title is required'),
-    company: z.string().min(1, 'Company is required'),
-    location: z.string().optional(),
-    startDate: z.string().min(1, 'Start date is required'),
-    endDate: z.string().optional(),
-    description: z.string().optional(),
-});
-
-const EducationSchema = z.object({
-    degree: z.string().min(1, 'Degree is required'),
-    major: z.string().optional(),
-    institution: z.string().min(1, 'Institution is required'),
-    graduationYear: z.number().int().min(1900, 'Graduation year must be a valid year').max(9999, 'Graduation year must be a valid year').optional(),
-    gpa: z.number().optional(),
-    description: z.string().optional(),
-});
-
-const SkillSchema = z.object({
-    id: z.number(),
-    name: z.string().min(1, 'Skill name is required'),
-});
-
-const LanguageSchema = z.object({
-    name: z.string().min(1, 'Language name is required'),
-    proficiency: z.string().min(1, 'Proficiency is required'),
-});
-
-const CertificationSchema = z.object({
-    name: z.string().min(1, 'Certification name is required'),
-    issuer: z.string().min(1, 'Issuer is required'),
-    issueDate: z.string().optional(),
-});
-
+// Enhanced schemas using shared components
 const ResumeSchema = z.object({
     id: z.string().optional(),
     fullName: z.string().min(1, 'Full name is required'),
@@ -70,6 +55,21 @@ const ResumeSchema = z.object({
     certifications: z.array(CertificationSchema).default([]),
 });
 
+const ResumeUpdateSchema = z.object({
+    fullName: z.string().min(1, 'Full name is required').optional(),
+    email: z.string().email('Invalid email').optional(),
+    phone: z.string().optional(),
+    address: z.string().optional(),
+    linkedIn: z.string().optional(),
+    website: z.string().optional(),
+    summary: z.string().optional(),
+    skills: z.array(SkillSchema).default([]),
+    workExperience: z.array(WorkExperienceSchema).optional(),
+    education: z.array(EducationSchema).optional(),
+    languages: z.array(LanguageSchema).default([]),
+    certifications: z.array(CertificationSchema).default([]),
+});
+
 const EnhanceDescriptionSchema = z.object({
     jobTitle: z.string().min(1, 'Job title is required'),
     description: z.string().min(1, 'Description is required'),
@@ -79,155 +79,91 @@ const EnhanceSummarySchema = z.object({
     summary: z.string().min(1, 'Summary is required'),
 });
 
-let genericDescription = "";
-
-// Fallback enhancement function
-const generateFallbackEnhancement = (jobTitle: string, description: string): string => {
-    const defaultBullets = [
-        `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.`,
-        `• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.`,
-        `• Contributed to key initiatives, adapting to dynamic work environments.`,
-    ];
-    genericDescription = description;
-    return defaultBullets.join('\n');
-};
-
-// Multer setup for file uploads (max 5MB, allowed types)
+// Multer configuration
+const storage = multer.memoryStorage();
 const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = [
-            'application/pdf',
-            'text/plain',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        ];
-        if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
+    storage,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+    fileFilter: (req: Express.Request, file: Express.Multer.File, callback: FileFilterCallback) => {
+        if (file.mimetype === 'application/pdf' || 
+            file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            file.mimetype === 'application/msword') {
+            callback(null, true);
         } else {
-            cb(new Error('Invalid file type. Only PDF, DOC, DOCX, and TXT are allowed.'));
+            callback(new Error('Only PDF and Word documents are allowed'));
         }
-    }
+    },
 });
 
+// POST /api/resumes/enhance-summary
 router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
     try {
-        // Parse and validate the request body
-        const { summary } = EnhanceSummarySchema.parse(req.body);
+        const parsed = EnhanceSummarySchema.parse(req.body);
+        const { summary } = parsed;
 
-        // Define the prompt for ChatGPT
-        const prompt = `
-You are an expert resume writer. Enhance the following professional summary to make it concise, impactful, and professional. Use strong language to highlight key strengths, experience, and career goals. Ensure the summary is ATS-friendly and suitable for a variety of roles. Return only the enhanced summary as a single paragraph.
+        const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. Original summary: ${summary}`;
 
-Input summary: ${summary}
-        `;
+        const enhancedSummary = await enhanceWithOpenAI(
+            prompt,
+            'You are a helpful assistant.',
+            "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth."
+        );
 
-        // Initialize variable to store enhanced summary
-        let enhancedSummary = '';
-        const maxRetries = 2;
-
-        // Retry logic for API call
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const response = await openai.chat.completions.create({
-                    model: 'gpt-3.5-turbo',
-                    messages: [
-                        { role: 'system', content: 'You are a helpful assistant.' },
-                        { role: 'user', content: prompt },
-                    ],
-                    temperature: 0.7 + (attempt - 1) * 0.1, // Increase creativity on retries
-                    max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
-                });
-
-                console.log(`OpenAI response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
-
-                const content = response.choices[0]?.message?.content?.trim();
-                if (content && content.length > 0) {
-                    enhancedSummary = content;
-                    break;
-                }
-                console.warn(`Empty or invalid response on attempt ${attempt}`);
-            } catch (apiError) {
-                console.error(`API error on attempt ${attempt}:`, apiError);
-                if (attempt === maxRetries) {
-                    throw apiError; // Rethrow on final attempt
-                }
-            }
-        }
-
-        // Use fallback if enhancement fails
-        if (!enhancedSummary) {
-            console.warn('Using fallback summary due to empty API response');
-            enhancedSummary = "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
-        }
-
-        // Return the enhanced summary
         return res.json({ enhancedSummary });
     } catch (error) {
-        console.error('Error in enhance-summary endpoint:', error);
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
-        }
-        return res.status(500).json({ error: 'Failed to enhance summary' });
+        handleValidationError(error, res);
     }
 }));
 
 // POST /api/resumes/enhance-description
 router.post('/enhance-description', asyncHandler(async (req: any, res) => {
     try {
-        const { jobTitle, description } = EnhanceDescriptionSchema.parse(req.body);
+        const parsed = EnhanceDescriptionSchema.parse(req.body);
+        const { jobTitle, description } = parsed;
 
-        const prompt = `
-You are an expert resume writer. Enhance the following job description for a ${jobTitle} role to make it professional, ATS-friendly, and impactful. Use strong action verbs, include quantifiable metrics where appropriate, and incorporate relevant keywords for the role. Format the output as bullet points starting with "• ". Each bullet should be concise and highlight key responsibilities or achievements. If the input is brief, expand it logically based on typical duties for the role. Return only the bullet-pointed (min 3 & max 4) text, no additional commentary.
+        const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. Original: ${description}`;
 
-Input description: ${description}
-    `;
-
-        // Try API call with retries
-        let enhancedDescription = '';
-        const maxRetries = 2;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                const response = await openai.chat.completions.create({
-                    model: 'gpt-3.5-turbo',
-                    messages: [
-                        { role: 'system', content: 'You are a helpful assistant.' },
-                        { role: 'user', content: prompt },
-                    ],
-                    temperature: 0.7 + (attempt - 1) * 0.1, // Slightly increase creativity on retries
-                    max_tokens: 500 + (attempt - 1) * 100, // Increase token limit on retries
-                });
-
-                console.log(`OpenAI response (attempt ${attempt}):`, JSON.stringify(response, null, 2));
-
-                const content = response.choices[0]?.message?.content?.trim();
-                if (content && content.includes('•')) {
-                    enhancedDescription = content;
-                    break;
-                }
-                console.warn(`Empty or invalid response on attempt ${attempt}`);
-            } catch (apiError) {
-                console.error(`API error on attempt ${attempt}:`, apiError);
-                if (attempt === maxRetries) {
-                    throw apiError; // Rethrow on final attempt
-                }
-            }
-        }
-
-        // Use fallback if enhancement is still empty
-        if (!enhancedDescription) {
-            console.warn('Using fallback enhancement due to empty API response');
-            enhancedDescription = generateFallbackEnhancement(jobTitle, genericDescription);
-        }
+        const enhancedDescription = await enhanceWithOpenAI(
+            prompt,
+            'You are a helpful assistant.',
+            `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments.`
+        );
 
         return res.json({ enhancedDescription });
     } catch (error) {
-        console.error('Error in enhance-description endpoint:', error);
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+        handleValidationError(error, res);
+    }
+}));
+
+// POST /api/resumes/new/pdf - Generate PDF from new resume data without saving
+router.post('/new/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
         }
-        return res.status(500).json({ error: 'Failed to enhance description' });
+
+        const { template = 'modern', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse(resumeData);
+
+        // Generate PDF using template without saving to database
+        const generateResume = require('../templates');
+        const doc = generateResume(validatedData, template);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
+
+        doc.pipe(res);
+        doc.end();
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'generate PDF');
+        }
     }
 }));
 
@@ -236,221 +172,77 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
-            res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
             return;
         }
-        console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-        // Extract template from request body, default to 'modern'
         const { template = 'modern', ...resumeData } = req.body;
         const validatedData = ResumeSchema.parse(resumeData);
-        console.log('Parsed resume:', JSON.stringify(validatedData, null, 2));
 
-        const processedSkills = await Promise.all(
-            validatedData.skills.map(async (skill) => {
-                return prisma.skill.upsert({
-                    where: { name: skill.name },
-                    update: {},
-                    create: { name: skill.name },
-                });
-            })
-        );
-        validatedData.skills = processedSkills;
-
-        const processedLanguages = await Promise.all(
-            validatedData.languages.map(async (lang) => {
-                return prisma.language.upsert({
-                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-                    update: {},
-                    create: { name: lang.name, proficiency: lang.proficiency },
-                });
-            })
-        );
-        validatedData.languages = processedLanguages;
-
-        // Create resume in database
-        await prisma.resume.create({
-            data: {
-                userId,
-                fullName: validatedData.fullName,
-                email: validatedData.email,
-                phone: validatedData.phone,
-                address: validatedData.address,
-                linkedIn: validatedData.linkedIn,
-                website: validatedData.website,
-                summary: validatedData.summary,
-                skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
-                languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
-                workExperiences: {
-                    create: validatedData.workExperience.map((exp: any) => ({
-                        jobTitle: exp.jobTitle,
-                        company: exp.company,
-                        location: exp.location,
-                        startDate: new Date(exp.startDate),
-                        endDate: exp.endDate ? new Date(exp.endDate) : null,
-                        description: exp.description,
-                    })),
-                },
-                educations: {
-                    create: validatedData.education.map((edu: any) => ({
-                        degree: edu.degree,
-                        major: edu.major,
-                        institution: edu.institution,
-                        graduationYear: edu.graduationYear,
-                        gpa: edu.gpa,
-                        description: edu.description,
-                    })),
-                },
-                certifications: {
-                    create: validatedData.certifications.map((cert: any) => ({
-                        name: cert.name,
-                        issuer: cert.issuer,
-                        issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                    })),
-                },
-            },
-        });
+        const resume = await createResume({
+            ...validatedData,
+            userId
+        } as ResumeData);
 
         // Generate PDF using template
         const generateResume = require('../templates');
         const doc = generateResume(validatedData, template);
 
-        // Set up response headers
-        res.set({
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': 'attachment; filename=resume.pdf',
-        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
 
-        // Pipe the PDF directly to the response
         doc.pipe(res);
         doc.end();
-
-        return;
     } catch (error) {
-        console.error('Error in resume endpoint:', error);
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'create resume');
         }
-        return res.status(500).json({ error: 'Failed to generate PDF' });
     }
 }));
 
-// GET /api/resumes - List all resumes for the current user
+// GET /api/resumes
 router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
 
-        const resumes = await prisma.resume.findMany({
-            where: { userId },
-            select: {
-                id: true,
-                fullName: true,
-                email: true,
-                createdAt: true,
-                updatedAt: true,
-                workExperiences: {
-                    select: {
-                        jobTitle: true,
-                        company: true,
-                        startDate: true,
-                        endDate: true,
-                    },
-                    orderBy: { startDate: 'desc' },
-                    take: 1,
-                },
-            },
-            orderBy: { updatedAt: 'desc' },
-        });
-
-        return res.json(resumes);
+        const resumes = await getUserResumes(userId);
+        res.json(resumes);
     } catch (error) {
-        console.error('Error fetching resumes:', error);
-        return res.status(500).json({ error: 'Failed to fetch resumes' });
+        handleDatabaseError(error, res, 'fetch resumes');
     }
 }));
 
-// GET /api/resumes/:id - Get a specific resume
+// GET /api/resumes/:id
 router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
 
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
 
-        const resume = await prisma.resume.findFirst({
-            where: {
-                id: resumeId,
-                userId,
-            },
-            include: {
-                skills: true,
-                languages: true,
-                workExperiences: {
-                    orderBy: { startDate: 'desc' },
-                },
-                educations: {
-                    orderBy: { graduationYear: 'desc' },
-                },
-                certifications: {
-                    orderBy: { issueDate: 'desc' },
-                },
-            },
-        });
+        const resume = await getResumeById(resumeId, userId);
 
         if (!resume) {
-            return res.status(404).json({ error: 'Resume not found' });
+            handleNotFound(res, 'Resume');
+            return;
         }
 
-        // Transform the data to match the expected format
-        const transformedResume = {
-            id: resume.id,
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone,
-            address: resume.address,
-            linkedIn: resume.linkedIn,
-            website: resume.website,
-            summary: resume.summary,
-            skills: resume.skills,
-            languages: resume.languages,
-            workExperience: resume.workExperiences.map((exp: any) => ({
-                jobTitle: exp.jobTitle,
-                company: exp.company,
-                location: exp.location,
-                startDate: exp.startDate.toISOString(),
-                endDate: exp.endDate?.toISOString(),
-                description: exp.description,
-            })),
-            education: resume.educations.map((edu: any) => ({
-                degree: edu.degree,
-                major: edu.major,
-                institution: edu.institution,
-                graduationYear: edu.graduationYear,
-                gpa: edu.gpa,
-                description: edu.description,
-            })),
-            certifications: resume.certifications.map((cert: any) => ({
-                name: cert.name,
-                issuer: cert.issuer,
-                issueDate: cert.issueDate?.toISOString(),
-            })),
-            createdAt: resume.createdAt,
-            updatedAt: resume.updatedAt,
-        };
-
-        return res.json(transformedResume);
+        res.json(resume);
     } catch (error) {
-        console.error('Error fetching resume:', error);
-        return res.status(500).json({ error: 'Failed to fetch resume' });
+        handleDatabaseError(error, res, 'fetch resume');
     }
 }));
 
@@ -459,128 +251,117 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'modern', ...resumeData } = req.body;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
 
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
 
-        // Verify resume exists and belongs to user
-        const existingResume = await prisma.resume.findFirst({
-            where: {
-                id: resumeId,
-                userId,
+        const validatedData = ResumeUpdateSchema.parse(req.body);
+
+        // Check if resume exists and belongs to user
+        const existingResume = await getResumeById(resumeId, userId);
+        if (!existingResume) {
+            handleNotFound(res, 'Resume');
+            return;
+        }
+
+        // Process skills and languages
+        const processedSkills = await processSkills(validatedData.skills);
+        const processedLanguages = await processLanguages(validatedData.languages);
+
+        // Update the resume with cascade updates
+        const updateData: any = {};
+        
+        // Only update fields that are provided
+        if (validatedData.fullName !== undefined) updateData.fullName = validatedData.fullName;
+        if (validatedData.email !== undefined) updateData.email = validatedData.email;
+        if (validatedData.phone !== undefined) updateData.phone = validatedData.phone;
+        if (validatedData.address !== undefined) updateData.address = validatedData.address;
+        if (validatedData.linkedIn !== undefined) updateData.linkedIn = validatedData.linkedIn;
+        if (validatedData.website !== undefined) updateData.website = validatedData.website;
+        if (validatedData.summary !== undefined) updateData.summary = validatedData.summary;
+        
+        // Update skills and languages if provided
+        if (validatedData.skills && validatedData.skills.length > 0) {
+            updateData.skills = { 
+                set: [], // Clear existing connections
+                connect: processedSkills.map((skill) => ({ id: skill.id }))
+            };
+        }
+        
+        if (validatedData.languages && validatedData.languages.length > 0) {
+            updateData.languages = { 
+                set: [], // Clear existing connections
+                connect: processedLanguages.map((lang) => ({ id: lang.id }))
+            };
+        }
+        
+        // Update work experiences if provided
+        if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+            updateData.workExperiences = {
+                deleteMany: {}, // Clear existing work experiences
+                create: validatedData.workExperience.map((exp) => ({
+                    jobTitle: exp.jobTitle,
+                    company: exp.company,
+                    location: exp.location,
+                    startDate: new Date(exp.startDate),
+                    endDate: exp.endDate ? new Date(exp.endDate) : null,
+                    description: exp.description,
+                })),
+            };
+        }
+        
+        // Update educations if provided
+        if (validatedData.education && validatedData.education.length > 0) {
+            updateData.educations = {
+                deleteMany: {}, // Clear existing educations
+                create: validatedData.education.map((edu) => ({
+                    degree: edu.degree,
+                    major: edu.major,
+                    institution: edu.institution,
+                    graduationYear: edu.graduationYear,
+                    gpa: edu.gpa,
+                    description: edu.description,
+                })),
+            };
+        }
+        
+        // Update certifications if provided
+        if (validatedData.certifications && validatedData.certifications.length > 0) {
+            updateData.certifications = {
+                deleteMany: {}, // Clear existing certifications
+                create: validatedData.certifications.map((cert) => ({
+                    name: cert.name,
+                    issuer: cert.issuer,
+                    issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                })),
+            };
+        }
+
+        const updatedResume = await prisma.resume.update({
+            where: { id: resumeId },
+            data: updateData,
+            include: {
+                skills: true,
+                languages: true,
+                workExperiences: true,
+                educations: true,
+                certifications: true,
             },
         });
 
-        if (!existingResume) {
-            return res.status(404).json({ error: 'Resume not found' });
-        }
-
-        const validatedData = ResumeSchema.parse(resumeData);
-
-        // Process skills and languages
-        const processedSkills = await Promise.all(
-            validatedData.skills.map(async (skill) => {
-                return prisma.skill.upsert({
-                    where: { name: skill.name },
-                    update: {},
-                    create: { name: skill.name },
-                });
-            })
-        );
-
-        const processedLanguages = await Promise.all(
-            validatedData.languages.map(async (lang) => {
-                return prisma.language.upsert({
-                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-                    update: {},
-                    create: { name: lang.name, proficiency: lang.proficiency },
-                });
-            })
-        );
-
-        // Update resume using transaction to ensure data consistency
-        await prisma.$transaction(async (tx: any) => {
-            // Delete existing relations
-            await tx.workExperience.deleteMany({ where: { resumeId } });
-            await tx.education.deleteMany({ where: { resumeId } });
-            await tx.certification.deleteMany({ where: { resumeId } });
-            await tx.resume.update({
-                where: { id: resumeId },
-                data: {
-                    skills: { set: [] },
-                    languages: { set: [] },
-                },
-            });
-
-            // Update resume with new data
-            await tx.resume.update({
-                where: { id: resumeId },
-                data: {
-                    fullName: validatedData.fullName,
-                    email: validatedData.email,
-                    phone: validatedData.phone,
-                    address: validatedData.address,
-                    linkedIn: validatedData.linkedIn,
-                    website: validatedData.website,
-                    summary: validatedData.summary,
-                    skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
-                    languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
-                    workExperiences: {
-                        create: validatedData.workExperience.map((exp: any) => ({
-                            jobTitle: exp.jobTitle,
-                            company: exp.company,
-                            location: exp.location,
-                            startDate: new Date(exp.startDate),
-                            endDate: exp.endDate ? new Date(exp.endDate) : null,
-                            description: exp.description,
-                        })),
-                    },
-                    educations: {
-                        create: validatedData.education.map((edu: any) => ({
-                            degree: edu.degree,
-                            major: edu.major,
-                            institution: edu.institution,
-                            graduationYear: edu.graduationYear,
-                            gpa: edu.gpa,
-                            description: edu.description,
-                        })),
-                    },
-                    certifications: {
-                        create: validatedData.certifications.map((cert: any) => ({
-                            name: cert.name,
-                            issuer: cert.issuer,
-                            issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                        })),
-                    },
-                },
-            });
-        });
-
-        // Generate updated PDF
-        const generateResume = require('../templates');
-        const doc = generateResume(validatedData, template);
-
-        res.set({
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': 'attachment; filename=resume.pdf',
-        });
-
-        doc.pipe(res);
-        doc.end();
-
-        return;
+        res.json(updatedResume);
     } catch (error) {
-        console.error('Error updating resume:', error);
         if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'update resume');
         }
-        return res.status(500).json({ error: 'Failed to update resume' });
     }
 }));
 
@@ -591,152 +372,70 @@ router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) =>
         const resumeId = parseInt(req.params.id, 10);
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
 
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
 
-        // Verify resume exists and belongs to user
-        const existingResume = await prisma.resume.findFirst({
-            where: {
-                id: resumeId,
-                userId,
-            },
-        });
-
+        // Check if resume exists and belongs to user
+        const existingResume = await getResumeById(resumeId, userId);
         if (!existingResume) {
-            return res.status(404).json({ error: 'Resume not found' });
+            handleNotFound(res, 'Resume');
+            return;
         }
 
-        // Delete resume and all related data using transaction
-        await prisma.$transaction(async (tx: any) => {
-            // Delete all related records first
-            await tx.workExperience.deleteMany({ where: { resumeId } });
-            await tx.education.deleteMany({ where: { resumeId } });
-            await tx.certification.deleteMany({ where: { resumeId } });
-
-            // Finally delete the resume
-            await tx.resume.delete({
-                where: { id: resumeId },
-            });
+        // Delete the resume (cascading deletes will handle related records)
+        await prisma.resume.delete({
+            where: { id: resumeId },
         });
 
-        return res.status(204).send();
+        res.status(204).send();
     } catch (error) {
-        console.error('Error deleting resume:', error);
-        return res.status(500).json({ error: 'Failed to delete resume' });
+        handleDatabaseError(error, res, 'delete resume');
     }
 }));
 
-// POST /api/resumes/:id/pdf - Generate PDF for a specific resume
+// POST /api/resumes/:id/pdf
 router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
-        const resumeId = req.params.id;
-        const { template = 'modern', ...resumeData } = req.body;
+        const resumeId = parseInt(req.params.id, 10);
+        const { template = 'modern' } = req.body;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
 
-        let validatedData;
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
 
-        if (resumeId === 'new') {
-            // For new resumes, validate the provided data
-            validatedData = ResumeSchema.parse(resumeData);
-        } else {
-            // For existing resumes, fetch from database
-            const parsedId = parseInt(resumeId, 10);
-            if (isNaN(parsedId)) {
-                return res.status(400).json({ error: 'Invalid resume ID' });
-            }
+        const resume = await getResumeById(resumeId, userId);
 
-            const existingResume = await prisma.resume.findFirst({
-                where: {
-                    id: parsedId,
-                    userId,
-                },
-                include: {
-                    skills: true,
-                    languages: true,
-                    workExperiences: {
-                        orderBy: { startDate: 'desc' },
-                    },
-                    educations: {
-                        orderBy: { graduationYear: 'desc' },
-                    },
-                    certifications: {
-                        orderBy: { issueDate: 'desc' },
-                    },
-                },
-            });
-
-            if (!existingResume) {
-                return res.status(404).json({ error: 'Resume not found' });
-            }
-
-            // Convert database model to the format expected by the template
-            validatedData = {
-                fullName: existingResume.fullName,
-                email: existingResume.email,
-                phone: existingResume.phone,
-                address: existingResume.address,
-                linkedIn: existingResume.linkedIn,
-                website: existingResume.website,
-                summary: existingResume.summary,
-                skills: existingResume.skills,
-                languages: existingResume.languages,
-                workExperience: existingResume.workExperiences.map((exp: any) => ({
-                    jobTitle: exp.jobTitle,
-                    company: exp.company,
-                    location: exp.location,
-                    startDate: exp.startDate.toISOString(),
-                    endDate: exp.endDate?.toISOString(),
-                    description: exp.description,
-                })),
-                education: existingResume.educations.map((edu: any) => ({
-                    degree: edu.degree,
-                    major: edu.major,
-                    institution: edu.institution,
-                    graduationYear: edu.graduationYear,
-                    gpa: edu.gpa,
-                    description: edu.description,
-                })),
-                certifications: existingResume.certifications.map((cert: any) => ({
-                    name: cert.name,
-                    issuer: cert.issuer,
-                    issueDate: cert.issueDate?.toISOString(),
-                })),
-            };
+        if (!resume) {
+            handleNotFound(res, 'Resume');
+            return;
         }
 
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, template);
+        const doc = generateResume(resume, template);
 
-        // Set up response headers
-        res.set({
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': 'attachment; filename=resume.pdf',
-        });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
 
-        // Pipe the PDF directly to the response
         doc.pipe(res);
         doc.end();
-
-        return;
     } catch (error) {
-        console.error('Error generating PDF:', error);
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
-        }
-        return res.status(500).json({ error: 'Failed to generate PDF' });
+        handleDatabaseError(error, res, 'generate PDF');
     }
 }));
 
-// POST /api/resumes/:id/enhance-pdf - Enhance resume for a job description and return as PDF
+// POST /api/resumes/:id/enhance-pdf
 router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
@@ -744,32 +443,26 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
         const { jobDescription, template = 'modern' } = req.body;
 
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
+
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
+
         if (!jobDescription || typeof jobDescription !== 'string') {
             return res.status(400).json({ error: 'Job description is required' });
         }
 
-        // Fetch the resume
-        const resume = await prisma.resume.findFirst({
-            where: { id: resumeId, userId },
-            include: {
-                skills: true,
-                languages: true,
-                workExperiences: { orderBy: { startDate: 'desc' } },
-                educations: { orderBy: { graduationYear: 'desc' } },
-                certifications: { orderBy: { issueDate: 'desc' } },
-            },
-        });
+        const resume = await getResumeById(resumeId, userId);
         if (!resume) {
-            return res.status(404).json({ error: 'Resume not found' });
+            handleNotFound(res, 'Resume');
+            return;
         }
 
-        // Prepare the resume data for enhancement
-        const resumeData = {
+        // Prepare resume data for enhancement
+        const resumeData: any = {
             fullName: resume.fullName,
             email: resume.email,
             phone: resume.phone,
@@ -779,47 +472,32 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
             summary: resume.summary,
             skills: resume.skills,
             languages: resume.languages,
-            workExperience: resume.workExperiences.map((exp: any) => ({
+            workExperience: resume.workExperiences?.map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
-                startDate: exp.startDate.toISOString(),
-                endDate: exp.endDate?.toISOString(),
+                startDate: exp.startDate,
+                endDate: exp.endDate,
                 description: exp.description,
-            })),
-            education: resume.educations.map((edu: any) => ({
+            })) || [],
+            education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 major: edu.major,
                 institution: edu.institution,
                 graduationYear: edu.graduationYear,
                 gpa: edu.gpa,
                 description: edu.description,
-            })),
-            certifications: resume.certifications.map((cert: any) => ({
+            })) || [],
+            certifications: resume.certifications?.map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
-                issueDate: cert.issueDate?.toISOString(),
-            })),
+                issueDate: cert.issueDate,
+            })) || [],
         };
 
-        // Detect language of the job description
-        const { detect } = require('langdetect');
-        const detected = detect(jobDescription);
-        const langCode = Array.isArray(detected) && detected.length > 0 ? detected[0].lang : 'en';
-        let language = 'English';
-        let languageInstruction = '';
-        
-        if (langCode !== 'en' && langCode !== 'und') {
-            const langs = (await import('langs')).default;
-            const langObj = langs.where('1', langCode); // '1' for ISO 639-1 code
-            if (langObj && langObj.name) {
-                language = langObj.name;
-                languageInstruction = `IMPORTANT: The job description is in ${language}. You must return the enhanced resume content (summary, job descriptions, etc.) in ${language}. Keep technical terms and proper nouns as appropriate.`;
-            }
-        }
-
-        // Compose the enhancement prompt
-        const prompt: string = `You are an expert resume writer. Enhance the following resume to best match the provided job description. Use strong, relevant language, optimize for ATS, and tailor the summary, work experience, and skills to the job requirements. ${languageInstruction} Return the enhanced resume as structured JSON in the following format:
+        // Detect language and create enhancement prompt
+        const languageInfo = await detectLanguage(jobDescription);
+        const prompt: string = `You are an expert resume writer. Enhance the following resume to best match the provided job description. Use strong, relevant language, optimize for ATS, and tailor the summary, work experience, and skills to the job requirements. ${languageInfo.instruction} Return the enhanced resume as structured JSON in the following format:
 
 {
   fullName,
@@ -851,61 +529,38 @@ ${JSON.stringify(resumeData, null, 2)}
                 const response = await openai.chat.completions.create({
                     model: 'gpt-3.5-turbo',
                     messages: [
-                        { role: 'system', content: 'You are a helpful assistant.' },
+                        { role: 'system', content: 'You are an expert resume writer. Return only valid JSON.' },
                         { role: 'user', content: prompt },
                     ],
-                    temperature: 0.7 + (attempt - 1) * 0.1,
-                    max_tokens: 1800,
+                    temperature: 0.7,
+                    max_tokens: 2000,
                 });
+
                 const content = response.choices[0]?.message?.content?.trim();
                 if (content) {
-                    // Try to extract JSON from the response
-                    let jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-                    let jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : null;
-                    if (jsonStr) {
-                        try {
-                            enhancedResume = JSON.parse(jsonStr);
-                            break;
-                        } catch (e) {
-                            // Try to fix common JSON issues
-                            try {
-                                enhancedResume = JSON.parse(jsonStr.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
-                                break;
-                            } catch (e2) { }
-                        }
+                    try {
+                        enhancedResume = JSON.parse(content);
+                        break;
+                    } catch (parseError) {
+                        console.warn(`JSON parse error on attempt ${attempt}:`, parseError);
                     }
                 }
             } catch (apiError) {
-                if (attempt === maxRetries) throw apiError;
+                console.error(`API error on attempt ${attempt}:`, apiError);
+                if (attempt === maxRetries) {
+                    throw apiError;
+                }
             }
         }
+
         if (!enhancedResume) {
             return res.status(500).json({ error: 'Failed to enhance resume' });
         }
 
         // Save the enhanced resume to the database
-        // Process skills and languages first
-        const processedSkills = await Promise.all(
-            (enhancedResume.skills || []).map(async (skill: any) => {
-                return prisma.skill.upsert({
-                    where: { name: skill.name },
-                    update: {},
-                    create: { name: skill.name },
-                });
-            })
-        );
+        const processedSkills = await processSkills(enhancedResume.skills || []);
+        const processedLanguages = await processLanguages(enhancedResume.languages || []);
 
-        const processedLanguages = await Promise.all(
-            (enhancedResume.languages || []).map(async (lang: any) => {
-                return prisma.language.upsert({
-                    where: { name_proficiency: { name: lang.name, proficiency: lang.proficiency } },
-                    update: {},
-                    create: { name: lang.name, proficiency: lang.proficiency },
-                });
-            })
-        );
-
-        // Create the enhanced resume in the database
         const savedResume = await prisma.resume.create({
             data: {
                 userId,
@@ -954,12 +609,9 @@ ${JSON.stringify(resumeData, null, 2)}
             resumeId: savedResume.id,
             message: 'Resume enhanced and saved successfully'
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error in enhance-pdf endpoint:', error);
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
-        }
-        return res.status(500).json({ error: 'Failed to enhance and generate PDF' });
+        res.status(500).json({ error: 'Failed to enhance resume' });
     }
 }));
 
@@ -968,16 +620,14 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
     try {
         const userId = req.user?.sub;
         if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            handleUnauthorized(res);
+            return;
         }
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
-        // Validate file size (already handled by multer)
-        // Validate file type (already handled by multer)
 
         // Step 1: Upload file to OpenAI
-        // @ts-ignore
         const formData = new (require('form-data'))();
         formData.append('file', req.file.buffer, {
             filename: req.file.originalname,
@@ -1012,18 +662,17 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
         });
         const threadId = threadResponse.data.id;
 
-        // Step 3: Add message to thread with file attachment
-        const messageData = {
+        // Step 3: Add a message to the thread with the file attachment
+        const messageResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
             role: 'user',
-            content: 'Please extract key information from this CV and return it as JSON format with the following structure: { personal_info: { fullName, email, phone, address, linkedIn, website }, work_experience: [{ company, jobTitle, startDate, endDate, description }], education: [{ institution, degree, major, graduationYear }], skills: [{ id, name }], languages: [{ name, proficiency }], certifications: [{ name, issuer, issueDate (optional) }] }',
+            content: 'Please extract the information from this resume and return it in the specified JSON format.',
             attachments: [
                 {
                     file_id: fileId,
-                    tools: [{ type: 'file_search' }],
-                },
-            ],
-        };
-        await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, messageData, {
+                    tools: [{ type: 'file_search' }]
+                }
+            ]
+        }, {
             headers: {
                 'Authorization': `Bearer ${openaiApiKey}`,
                 'OpenAI-Beta': 'assistants=v2',
@@ -1031,9 +680,10 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             },
         });
 
-        // Step 4: Create and run the assistant
-        const runData = { assistant_id: openaiAssistantId };
-        const runResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, runData, {
+        // Step 4: Run the assistant
+        const runResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+            assistant_id: openaiAssistantId,
+        }, {
             headers: {
                 'Authorization': `Bearer ${openaiApiKey}`,
                 'OpenAI-Beta': 'assistants=v2',
@@ -1043,73 +693,82 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
         const runId = runResponse.data.id;
 
         // Step 5: Poll for completion
-        let attempts = 0;
-        const maxAttempts = 30;
-        let status = '';
-        let lastError = null;
-        while (attempts < maxAttempts) {
+        let runStatus = 'in_progress';
+        let pollAttempts = 0;
+        const maxPollAttempts = 30; // 5 minutes max
+
+        while (runStatus === 'in_progress' || runStatus === 'queued') {
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+            pollAttempts++;
+
+            if (pollAttempts > maxPollAttempts) {
+                return res.status(408).json({ error: 'Processing timeout' });
+            }
+
             const statusResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
                 headers: {
                     'Authorization': `Bearer ${openaiApiKey}`,
                     'OpenAI-Beta': 'assistants=v2',
                 },
             });
-            status = statusResponse.data.status;
-            if (status === 'completed') {
-                break;
-            } else if (['failed', 'cancelled', 'expired'].includes(status)) {
-                lastError = statusResponse.data.last_error?.message || 'Unknown error';
-                break;
-            }
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            attempts++;
-        }
-        if (status !== 'completed') {
-            return res.status(500).json({ error: `Analysis failed with status: ${status}. Error: ${lastError}` });
+            runStatus = statusResponse.data.status;
         }
 
-        // Step 6: Get the assistant's response
+        if (runStatus !== 'completed') {
+            return res.status(500).json({ error: `Processing failed with status: ${runStatus}` });
+        }
+
+        // Step 6: Retrieve the messages
         const messagesResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
             headers: {
                 'Authorization': `Bearer ${openaiApiKey}`,
                 'OpenAI-Beta': 'assistants=v2',
             },
         });
+
         const messages = messagesResponse.data.data;
-        let extractedJson = null;
-        for (const message of messages) {
-            if (message.role === 'assistant') {
-                const content = message.content;
-                if (content && content.length > 0 && content[0].type === 'text') {
-                    const responseText = content[0].text.value;
-                    // Try to extract JSON from the response
-                    let jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        let jsonStr = jsonMatch[1] || jsonMatch[0];
-                        try {
-                            extractedJson = JSON.parse(jsonStr);
-                        } catch (e) {
-                            // Try to fix common JSON issues (e.g., trailing commas)
-                            try {
-                                extractedJson = JSON.parse(jsonStr.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']'));
-                            } catch (e2) {
-                                extractedJson = null;
-                            }
-                        }
-                    }
-                }
+        const assistantMessage = messages.find((msg: any) => msg.role === 'assistant');
+
+        if (!assistantMessage || !assistantMessage.content || !assistantMessage.content[0]) {
+            return res.status(500).json({ error: 'No response from assistant' });
+        }
+
+        const extractedText = assistantMessage.content[0].text.value;
+
+        // Parse the JSON response
+        let parsedData;
+        try {
+            const jsonMatch = extractedText.match(/```json\n([\s\S]*?)\n```/) || extractedText.match(/```\n([\s\S]*?)\n```/) || extractedText.match(/({[\s\S]*})/);
+            if (jsonMatch) {
+                parsedData = JSON.parse(jsonMatch[1]);
+            } else {
+                parsedData = JSON.parse(extractedText);
             }
+        } catch (parseError) {
+            console.error('JSON parse error:', parseError);
+            console.log('Extracted text:', extractedText);
+            return res.status(500).json({ error: 'Failed to parse extracted data' });
         }
-        if (!extractedJson) {
-            return res.status(500).json({ error: 'Failed to extract JSON from assistant response' });
+
+        // Clean up: Delete the uploaded file
+        try {
+            await axios.delete(`https://api.openai.com/v1/files/${fileId}`, {
+                headers: {
+                    'Authorization': `Bearer ${openaiApiKey}`,
+                },
+            });
+        } catch (deleteError) {
+            console.warn('Failed to delete uploaded file:', deleteError);
         }
-        return res.json({ extracted: extractedJson });
+
+        res.json(parsedData);
     } catch (error: any) {
-        console.error('Error in file upload route:', error);
-        if (error instanceof multer.MulterError) {
-            return res.status(400).json({ error: error.message });
+        console.error('Error in upload endpoint:', error);
+        if (error.response) {
+            console.error('Response data:', error.response.data);
+            console.error('Response status:', error.response.status);
         }
-        return res.status(500).json({ error: error.message || 'Failed to process file upload' });
+        res.status(500).json({ error: 'Failed to process resume' });
     }
 }));
 

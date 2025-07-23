@@ -1,12 +1,16 @@
 import express from 'express';
-import Stripe from 'stripe';
-import { PrismaClient } from '@prisma/client';
 import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+// Import shared utilities and services
+import { prisma } from '../lib/database';
+import { stripe } from '../lib/stripe';
+import { 
+    handleDatabaseError, 
+    handleUnauthorized, 
+    handleGenericError 
+} from '../utils/errorHandling';
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
 // Test endpoint to verify Stripe and database configuration
@@ -49,7 +53,8 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
     const { priceId } = req.body;
 
     if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
+        handleUnauthorized(res);
+        return;
     }
 
     // Validate required environment variables
@@ -130,20 +135,21 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
         // Return more specific error messages
         if (error.type === 'StripeInvalidRequestError') {
             return res.status(400).json({ 
-                error: 'Invalid request to Stripe', 
-                details: error.message 
+                error: 'Invalid Stripe request', 
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined 
             });
         }
         
         if (error.code === 'price_not_found') {
             return res.status(400).json({ 
-                error: 'Invalid price ID provided' 
+                error: 'Invalid price ID', 
+                details: process.env.NODE_ENV === 'development' ? 'The specified price was not found' : undefined 
             });
         }
-
+        
         res.status(500).json({ 
-            error: 'Failed to create checkout session',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: 'Failed to create checkout session', 
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined 
         });
     }
 }));
@@ -151,41 +157,68 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
 // Get subscription status
 router.get('/subscription-status', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-            planType: true,
-            subscriptionStatus: true,
-            subscriptionEnd: true,
-            subscriptionStart: true
-        }
-    });
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
 
-    res.json(user || { planType: 'free' });
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                planType: true,
+                subscriptionStatus: true,
+                subscriptionStart: true,
+                subscriptionEnd: true,
+                stripeCustomerId: true,
+                subscriptionId: true
+            }
+        });
+
+        if (!user) {
+            return res.json({
+                planType: 'free',
+                subscriptionStatus: null,
+                subscriptionStart: null,
+                subscriptionEnd: null
+            });
+        }
+
+        res.json(user);
+    } catch (error) {
+        handleDatabaseError(error, res, 'fetch subscription status');
+    }
 }));
 
 // Cancel subscription
 router.post('/cancel-subscription', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { subscriptionId: true }
-    });
-
-    if (!user?.subscriptionId) {
-        return res.status(404).json({ error: 'No subscription found' });
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
     }
 
-    await stripe.subscriptions.cancel(user.subscriptionId);
-    res.json({ message: 'Subscription canceled successfully' });
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { subscriptionId: true }
+        });
+
+        if (!user?.subscriptionId) {
+            return res.status(400).json({ error: 'No active subscription found' });
+        }
+
+        await stripe.subscriptions.cancel(user.subscriptionId);
+        res.json({ message: 'Subscription canceled successfully' });
+    } catch (error) {
+        handleGenericError(error, res, 'cancel subscription');
+    }
 }));
 
 // Stripe webhook handler
 router.post('/webhook', (req: any, res: any) => {
     const sig = req.headers['stripe-signature'] as string;
-    let event: Stripe.Event;
+    let event: any;
 
     try {
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
@@ -203,27 +236,30 @@ router.post('/webhook', (req: any, res: any) => {
     });
 });
 
-async function handleWebhookEvent(event: Stripe.Event) {
+async function handleWebhookEvent(event: any) {
     switch (event.type) {
         case 'customer.subscription.created':
         case 'customer.subscription.updated':
-            const subscription = event.data.object as Stripe.Subscription;
+            const subscription = event.data.object as any;
             await handleSubscriptionUpdate(subscription);
             break;
         
         case 'customer.subscription.deleted':
-            const deletedSubscription = event.data.object as Stripe.Subscription;
+            const deletedSubscription = event.data.object as any;
             await handleSubscriptionCancellation(deletedSubscription);
             break;
         
         case 'invoice.payment_failed':
-            const failedInvoice = event.data.object as Stripe.Invoice;
+            const failedInvoice = event.data.object as any;
             await handlePaymentFailure(failedInvoice);
             break;
+        
+        default:
+            console.log(`Unhandled event type ${event.type}`);
     }
 }
 
-async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
+async function handleSubscriptionUpdate(subscription: any) {
     const customerId = subscription.customer as string;
     
     try {
@@ -253,7 +289,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     }
 }
 
-async function handleSubscriptionCancellation(subscription: Stripe.Subscription) {
+async function handleSubscriptionCancellation(subscription: any) {
     const customerId = subscription.customer as string;
     
     try {
@@ -270,6 +306,7 @@ async function handleSubscriptionCancellation(subscription: Stripe.Subscription)
                 data: {
                     subscriptionStatus: 'canceled',
                     planType: 'free',
+                    subscriptionEnd: new Date(),
                 }
             });
         }
@@ -278,9 +315,28 @@ async function handleSubscriptionCancellation(subscription: Stripe.Subscription)
     }
 }
 
-async function handlePaymentFailure(invoice: Stripe.Invoice) {
-    // Handle payment failure logic
-    console.log('Payment failed for invoice:', invoice.id);
+async function handlePaymentFailure(invoice: any) {
+    const customerId = invoice.customer as string;
+    
+    try {
+        const customer = await stripe.customers.retrieve(customerId);
+        
+        if (customer.deleted) {
+            console.error('Customer was deleted');
+            return;
+        }
+        
+        if (customer.metadata?.userId) {
+            await prisma.user.update({
+                where: { id: customer.metadata.userId },
+                data: {
+                    subscriptionStatus: 'past_due',
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error handling payment failure:', error);
+    }
 }
 
 export default router;

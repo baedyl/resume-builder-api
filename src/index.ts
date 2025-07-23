@@ -1,3 +1,7 @@
+// Load environment variables first
+import dotenv from 'dotenv';
+dotenv.config();
+
 const express = require('express');
 import cors from 'cors';
 import resumeRouter from './routes/resume';

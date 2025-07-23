@@ -1,202 +1,304 @@
 import express from 'express';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import OpenAI from 'openai';
 import { ensureAuthenticated } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 import PDFDocument from 'pdfkit';
-import { detect } from 'langdetect';
 import { requirePremium } from '../middleware/subscription';
-// Remove langdetect import due to missing module; will handle language detection differently if needed
 
-const prisma = new PrismaClient();
+// Import shared utilities and services
+import { prisma } from '../lib/database';
+import { detectLanguage } from '../utils/language';
+import { enhanceWithOpenAI } from '../utils/openai';
+import { ContactInfoSchema } from '../utils/validation';
+import { 
+    handleValidationError, 
+    handleDatabaseError, 
+    handleUnauthorized, 
+    handleNotFound 
+} from '../utils/errorHandling';
+
 const router = express.Router();
 
+// Validation schemas using shared components
 const CoverLetterGenerateSchema = z.object({
     jobDescription: z.string().min(1, 'Job description is required'),
-    fullName: z.string().optional(),
-    email: z.string().email('Invalid email').optional(),
-    phone: z.string().optional(),
-    address: z.string().optional(),
-});
+}).merge(ContactInfoSchema);
 
 const CoverLetterSchema = z.object({
     content: z.string().min(1, 'Content is required'),
-    fullName: z.string().optional(),
-    email: z.string().email('Invalid email').optional(),
-    phone: z.string().optional(),
-    address: z.string().optional(),
-});
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+}).merge(ContactInfoSchema);
 
 // POST /api/cover-letter - Generate and save a new cover letter
 router.post('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    let parsed;
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
+
     try {
-        parsed = CoverLetterGenerateSchema.parse(req.body);
+        const parsed = CoverLetterGenerateSchema.parse(req.body);
+        const { jobDescription, fullName, email, phone, address } = parsed;
+
+        // Detect language and generate cover letter
+        const languageInfo = await detectLanguage(jobDescription);
+        
+        // Set system message based on language
+        let systemMessage = 'You are a helpful assistant.';
+        if (languageInfo.code === 'fr') systemMessage = 'Vous êtes un assistant utile.';
+        else if (languageInfo.code === 'es') systemMessage = 'Eres un asistente útil.';
+
+        const prompt = `Write a professional cover letter for the following job description. Use the provided personal information if available. ${languageInfo.instruction}
+
+Job Description:
+${jobDescription}
+
+Personal Information:
+- Name: ${fullName || 'Not provided'}
+- Email: ${email || 'Not provided'}
+- Phone: ${phone || 'Not provided'}
+- Address: ${address || 'Not provided'}
+
+Please write a compelling, professional cover letter that highlights relevant skills and experience.`;
+
+        const content = await enhanceWithOpenAI(
+            prompt,
+            systemMessage,
+            'Dear Hiring Manager,\n\nI am writing to express my interest in the position described. With my background and experience, I believe I would be a valuable addition to your team.\n\nThank you for your consideration.\n\nSincerely,\n[Your Name]'
+        );
+
+        // Save cover letter to database
+        const coverLetter = await prisma.coverLetter.create({
+            data: {
+                userId,
+                content,
+                fullName,
+                email,
+                phone,
+                address,
+            },
+        });
+
+        res.status(201).json(coverLetter);
     } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
-        }
-        return res.status(500).json({ error: 'Failed to generate cover letter' });
+        handleValidationError(error, res);
     }
-    const { jobDescription, fullName, email, phone, address } = parsed;
-
-    // Detect language of the job description
-    const detected = detect(jobDescription); // returns LanguageDetectionResult[]
-    const langCode = Array.isArray(detected) && detected.length > 0 ? detected[0].lang : 'en';
-    let language = 'English';
-    let systemMessage = 'You are a helpful assistant.';
-    if (langCode !== 'en' && langCode !== 'und') {
-        const langs = (await import('langs')).default;
-        const langObj = langs.where('1', langCode); // '1' for ISO 639-1 code
-        if (langObj && langObj.name) {
-            language = langObj.name;
-            // Set system message in the detected language if possible
-            if (langCode === 'fr') systemMessage = 'Vous êtes un assistant utile.';
-            else if (langCode === 'es') systemMessage = 'Eres un asistente útil.';
-            // Add more languages as needed
-        }
-    }
-
-    // Compose the prompt for OpenAI
-    const prompt = `You are an expert career coach and writer. Write a professional, personalized cover letter for the following job description. Use the provided personal information if available. The letter should be formal, concise, and tailored to the job requirements. Return only the cover letter text, no commentary or markdown.\nIf the job description is not in English, write the cover letter in ${language}.\n\nJob Description:\n${jobDescription}\n\nPersonal Info:\n${fullName ? `Full Name: ${fullName}\n` : ''}${email ? `Email: ${email}\n` : ''}${phone ? `Phone: ${phone}\n` : ''}${address ? `Address: ${address}\n` : ''}`;
-
-    let coverLetterContent = '';
-    const maxRetries = 2;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            const response = await openai.chat.completions.create({
-                model: 'gpt-3.5-turbo',
-                messages: [
-                    { role: 'system', content: systemMessage },
-                    { role: 'user', content: prompt },
-                ],
-                temperature: 0.7 + (attempt - 1) * 0.1,
-                max_tokens: 800,
-            });
-            const content = response.choices[0]?.message?.content?.trim();
-            if (content && content.length > 0) {
-                coverLetterContent = content;
-                break;
-            }
-        } catch (apiError) {
-            if (attempt === maxRetries) {
-                return res.status(500).json({ error: 'Failed to generate cover letter' });
-            }
-        }
-    }
-    if (!coverLetterContent) {
-        coverLetterContent = 'Dear Hiring Manager,\n\nI am excited to apply for this position. My background and skills make me a strong fit for the role. I look forward to the opportunity to contribute to your team.\n\nSincerely,\n' + (fullName || '');
-    }
-
-    // Save to DB
-    const saved = await prisma.coverLetter.create({
-        data: {
-            userId,
-            content: coverLetterContent,
-            fullName,
-            email,
-            phone,
-            address,
-        },
-    });
-    return res.json({ coverLetter: coverLetterContent, record: saved });
 }));
 
-// GET /api/cover-letter - List all cover letters for the current user
+// GET /api/cover-letter - List all cover letters for the authenticated user
 router.get('/', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    const coverLetters = await prisma.coverLetter.findMany({
-        where: { userId },
-        orderBy: { updatedAt: 'desc' },
-    });
-    return res.json(coverLetters);
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
+
+    try {
+        const coverLetters = await prisma.coverLetter.findMany({
+            where: { userId },
+            orderBy: { updatedAt: 'desc' },
+        });
+
+        res.json(coverLetters);
+    } catch (error) {
+        handleDatabaseError(error, res, 'fetch cover letters');
+    }
 }));
 
 // GET /api/cover-letter/:id - Get a specific cover letter
 router.get('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    const id = parseInt(req.params.id, 10);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid cover letter ID' });
-    const coverLetter = await prisma.coverLetter.findFirst({
-        where: { id, userId },
-    });
-    if (!coverLetter) return res.status(404).json({ error: 'Cover letter not found' });
-    return res.json(coverLetter);
+    const coverLetterId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
+
+    if (isNaN(coverLetterId)) {
+        return res.status(400).json({ error: 'Invalid cover letter ID' });
+    }
+
+    try {
+        const coverLetter = await prisma.coverLetter.findFirst({
+            where: { id: coverLetterId, userId },
+        });
+
+        if (!coverLetter) {
+            handleNotFound(res, 'Cover letter');
+            return;
+        }
+
+        res.json(coverLetter);
+    } catch (error) {
+        handleDatabaseError(error, res, 'fetch cover letter');
+    }
 }));
 
 // PUT /api/cover-letter/:id - Update a specific cover letter
 router.put('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    const id = parseInt(req.params.id, 10);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid cover letter ID' });
-    const existing = await prisma.coverLetter.findFirst({ where: { id, userId } });
-    if (!existing) return res.status(404).json({ error: 'Cover letter not found' });
-    let data;
-    try {
-        data = CoverLetterSchema.parse(req.body);
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ error: 'Invalid input', details: error.errors });
-        }
-        return res.status(500).json({ error: 'Failed to update cover letter' });
+    const coverLetterId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
     }
-    const updated = await prisma.coverLetter.update({
-        where: { id },
-        data,
-    });
-    return res.json(updated);
+
+    if (isNaN(coverLetterId)) {
+        return res.status(400).json({ error: 'Invalid cover letter ID' });
+    }
+
+    try {
+        const parsed = CoverLetterSchema.parse(req.body);
+        const { content, fullName, email, phone, address } = parsed;
+
+        // Check if cover letter exists and belongs to user
+        const existingCoverLetter = await prisma.coverLetter.findFirst({
+            where: { id: coverLetterId, userId },
+        });
+
+        if (!existingCoverLetter) {
+            handleNotFound(res, 'Cover letter');
+            return;
+        }
+
+        const updatedCoverLetter = await prisma.coverLetter.update({
+            where: { id: coverLetterId },
+            data: {
+                content,
+                fullName,
+                email,
+                phone,
+                address,
+            },
+        });
+
+        res.json(updatedCoverLetter);
+    } catch (error) {
+        handleValidationError(error, res);
+    }
 }));
 
 // DELETE /api/cover-letter/:id - Delete a specific cover letter
 router.delete('/:id', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    const id = parseInt(req.params.id, 10);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid cover letter ID' });
-    const existing = await prisma.coverLetter.findFirst({ where: { id, userId } });
-    if (!existing) return res.status(404).json({ error: 'Cover letter not found' });
-    await prisma.coverLetter.delete({ where: { id } });
-    return res.status(204).send();
+    const coverLetterId = parseInt(req.params.id, 10);
+
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
+
+    if (isNaN(coverLetterId)) {
+        return res.status(400).json({ error: 'Invalid cover letter ID' });
+    }
+
+    try {
+        // Check if cover letter exists and belongs to user
+        const existingCoverLetter = await prisma.coverLetter.findFirst({
+            where: { id: coverLetterId, userId },
+        });
+
+        if (!existingCoverLetter) {
+            handleNotFound(res, 'Cover letter');
+            return;
+        }
+
+        await prisma.coverLetter.delete({
+            where: { id: coverLetterId },
+        });
+
+        res.status(204).send();
+    } catch (error) {
+        handleDatabaseError(error, res, 'delete cover letter');
+    }
 }));
 
 // POST /api/cover-letter/:id/pdf - Generate PDF for a specific cover letter
 router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
-    const id = parseInt(req.params.id, 10);
-    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-    if (isNaN(id)) return res.status(400).json({ error: 'Invalid cover letter ID' });
-    const coverLetter = await prisma.coverLetter.findFirst({ where: { id, userId } });
-    if (!coverLetter) return res.status(404).json({ error: 'Cover letter not found' });
+    const coverLetterId = parseInt(req.params.id, 10);
 
-    // Generate PDF
-    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 50, bottom: 50, left: 50, right: 50 } });
-    res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': 'attachment; filename=cover-letter.pdf',
-    });
-    doc.font('Helvetica-Bold').fontSize(18).text(coverLetter.fullName || '', { align: 'left' });
-    doc.moveDown(0.5);
-    if (coverLetter.email || coverLetter.phone || coverLetter.address) {
-        doc.font('Helvetica').fontSize(11).text([
+    if (!userId) {
+        handleUnauthorized(res);
+        return;
+    }
+
+    if (isNaN(coverLetterId)) {
+        return res.status(400).json({ error: 'Invalid cover letter ID' });
+    }
+
+    try {
+        const coverLetter = await prisma.coverLetter.findFirst({
+            where: { id: coverLetterId, userId },
+        });
+
+        if (!coverLetter) {
+            handleNotFound(res, 'Cover letter');
+            return;
+        }
+
+        // Generate PDF
+        const doc = new PDFDocument({
+            size: 'LETTER',
+            margins: {
+                top: 50,
+                bottom: 50,
+                left: 50,
+                right: 50
+            }
+        });
+
+        // Header with personal information
+        if (coverLetter.fullName) {
+            doc.font('Helvetica-Bold')
+               .fontSize(16)
+               .text(coverLetter.fullName, { align: 'center' });
+            doc.moveDown(0.5);
+        }
+
+        const contactInfo = [
             coverLetter.email,
             coverLetter.phone,
-            coverLetter.address
-        ].filter(Boolean).join(' | '), { align: 'left' });
-        doc.moveDown(1);
+            coverLetter.address,
+        ].filter(Boolean).join(' • ');
+
+        if (contactInfo) {
+            doc.font('Helvetica')
+               .fontSize(11)
+               .text(contactInfo, { align: 'center' });
+            doc.moveDown(1);
+        }
+
+        // Current date
+        const currentDate = new Date().toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        doc.font('Helvetica')
+           .fontSize(11)
+           .text(currentDate, { align: 'right' });
+        doc.moveDown(2);
+
+        // Cover letter content
+        doc.font('Helvetica')
+           .fontSize(11)
+           .text(coverLetter.content, {
+               align: 'justify',
+               lineGap: 3
+           });
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="cover-letter.pdf"');
+
+        doc.pipe(res);
+        doc.end();
+    } catch (error) {
+        handleDatabaseError(error, res, 'generate cover letter PDF');
     }
-    doc.font('Helvetica').fontSize(12).text(coverLetter.content, { align: 'left', lineGap: 2 });
-    doc.end();
-    doc.pipe(res);
 }));
 
 export default router; 

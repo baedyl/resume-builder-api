@@ -9,6 +9,8 @@ declare global {
       STRIPE_WEBHOOK_SECRET: string;
       STRIPE_PRICE_ID_PREMIUM: string;
       FRONTEND_URL: string;
+      AUTH0_DOMAIN: string;
+      AUTH0_AUDIENCE: string;
       NODE_ENV: 'development' | 'production' | 'test';
     }
   }
