@@ -15,7 +15,7 @@ const app = express();
 
 // Configure CORS for your frontend origins
 app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:3000', 'https://resume-builder-front.vercel.app'],
+    origin: ['http://localhost:5173', 'https://www.proairesume.online', 'https://resume-builder-front.vercel.app'],
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
