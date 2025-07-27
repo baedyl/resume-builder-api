@@ -167,8 +167,8 @@ router.post('/new/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
     }
 }));
 
-// POST /api/resumes
-router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+// POST /api/resumes/save-and-pdf - Save resume and return PDF
+router.post('/save-and-pdf', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
@@ -195,6 +195,49 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         doc.end();
     } catch (error) {
         if (error instanceof z.ZodError) {
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'create resume');
+        }
+    }
+}));
+
+// POST /api/resumes - Save resume and return data (for debugging)
+router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        const { template = 'modern', ...resumeData } = req.body;
+        console.log('Received work experience count:', resumeData.workExperience?.length || 0);
+        
+        const validatedData = ResumeSchema.parse(resumeData);
+        console.log('Validated work experience count:', validatedData.workExperience?.length || 0);
+
+        const resume = await createResume({
+            ...validatedData,
+            userId
+        } as ResumeData);
+
+        // Fetch the complete resume with all relations to verify data was saved
+        const completeResume = await getResumeById(resume.id, userId);
+        
+        console.log('Saved work experiences:', completeResume?.workExperiences?.length || 0);
+
+        // Return the saved resume data instead of PDF for debugging
+        res.json({
+            success: true,
+            resumeId: resume.id,
+            workExperiencesCount: completeResume?.workExperiences?.length || 0,
+            resume: completeResume
+        });
+    } catch (error) {
+        console.error('Error saving resume:', error);
+        if (error instanceof z.ZodError) {
+            console.error('Validation errors:', error.errors);
             handleValidationError(error, res);
         } else {
             handleDatabaseError(error, res, 'create resume');

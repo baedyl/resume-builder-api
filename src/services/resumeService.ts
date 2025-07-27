@@ -18,6 +18,7 @@ export interface ResumeData {
         location?: string;
         startDate: string;
         endDate?: string;
+        isCurrent?: boolean;
         description?: string;
     }>;
     education: Array<{
@@ -35,7 +36,7 @@ export interface ResumeData {
     }>;
 }
 
-export async function processSkills(skills: Array<{ name: string }>) {
+export async function processSkills(skills: Array<{ id?: number; name: string }>) {
     return Promise.all(
         skills.map(async (skill) => {
             return prisma.skill.upsert({
@@ -60,50 +61,84 @@ export async function processLanguages(languages: Array<{ name: string; proficie
 }
 
 export async function createResume(data: ResumeData) {
+    console.log('=== RESUME CREATION DEBUG ===');
+    console.log('Input data.workExperience:', JSON.stringify(data.workExperience, null, 2));
+    console.log('Work experience count:', data.workExperience?.length || 0);
+
     const processedSkills = await processSkills(data.skills);
     const processedLanguages = await processLanguages(data.languages);
 
-    return prisma.resume.create({
-        data: {
-            userId: data.userId,
-            fullName: data.fullName,
-            email: data.email,
-            phone: data.phone,
-            address: data.address,
-            linkedIn: data.linkedIn,
-            website: data.website,
-            summary: data.summary,
-            skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
-            languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
-            workExperiences: {
-                create: data.workExperience.map((exp) => ({
-                    jobTitle: exp.jobTitle,
-                    company: exp.company,
-                    location: exp.location,
-                    startDate: new Date(exp.startDate),
-                    endDate: exp.endDate ? new Date(exp.endDate) : null,
-                    description: exp.description,
-                })),
-            },
-            educations: {
-                create: data.education.map((edu) => ({
-                    degree: edu.degree,
-                    major: edu.major,
-                    institution: edu.institution,
-                    graduationYear: edu.graduationYear,
-                    gpa: edu.gpa,
-                    description: edu.description,
-                })),
-            },
-            certifications: {
-                create: data.certifications.map((cert) => ({
-                    name: cert.name,
-                    issuer: cert.issuer,
-                    issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                })),
-            },
-        },
+    // Create work experience data for database
+    const workExperienceData = data.workExperience.map((exp, index) => {
+        console.log(`Processing work experience ${index + 1}:`, {
+            jobTitle: exp.jobTitle,
+            company: exp.company,
+            startDate: exp.startDate,
+            endDate: exp.endDate
+        });
+        return {
+            jobTitle: exp.jobTitle,
+            company: exp.company,
+            location: exp.location,
+            startDate: new Date(exp.startDate),
+            endDate: exp.endDate ? new Date(exp.endDate) : null,
+            description: exp.description,
+        };
     });
+
+    console.log('Prepared work experience data for DB:', JSON.stringify(workExperienceData, null, 2));
+
+    try {
+        const result = await prisma.resume.create({
+            data: {
+                userId: data.userId,
+                fullName: data.fullName,
+                email: data.email,
+                phone: data.phone,
+                address: data.address,
+                linkedIn: data.linkedIn,
+                website: data.website,
+                summary: data.summary,
+                skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
+                languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
+                workExperiences: {
+                    create: workExperienceData,
+                },
+                educations: {
+                    create: data.education.map((edu) => ({
+                        degree: edu.degree,
+                        major: edu.major,
+                        institution: edu.institution,
+                        graduationYear: edu.graduationYear,
+                        gpa: edu.gpa,
+                        description: edu.description,
+                    })),
+                },
+                certifications: {
+                    create: data.certifications.map((cert) => ({
+                        name: cert.name,
+                        issuer: cert.issuer,
+                        issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                    })),
+                },
+            },
+            include: {
+                workExperiences: true,
+                educations: true,
+                certifications: true,
+                skills: true,
+                languages: true,
+            },
+        });
+
+        console.log('Resume created with ID:', result.id);
+        console.log('Created work experiences count:', result.workExperiences?.length || 0);
+        
+        return result;
+    } catch (error) {
+        console.error('Database error creating resume:', error);
+        throw error;
+    }
 }
 
 export async function getResumeById(id: number, userId: string) {

@@ -7,6 +7,7 @@ export const WorkExperienceSchema = z.object({
     location: z.string().optional(),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().optional(),
+    isCurrent: z.boolean().optional(),
     description: z.string().optional(),
 });
 
@@ -20,7 +21,7 @@ export const EducationSchema = z.object({
 });
 
 export const SkillSchema = z.object({
-    id: z.number(),
+    id: z.number().optional(),
     name: z.string().min(1, 'Skill name is required'),
 });
 
