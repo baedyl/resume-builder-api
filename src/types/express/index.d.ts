@@ -6,7 +6,11 @@ declare global {
     // Merge with the core Request so .body and .headers exist
     interface Request extends core.Request {
       // add your own field from ensureAuthenticated
-      user?: { sub: string };
+      user?: { 
+        sub: string; 
+        email?: string;
+        isPremium?: boolean;
+      };
     }
   }
 }

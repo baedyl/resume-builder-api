@@ -34,7 +34,7 @@ import {
     processLanguages,
     type ResumeData 
 } from '../services/resumeService';
-import { requirePremium } from '../middleware/subscription';
+import { requirePremium, withPremiumFeatures } from '../middleware/subscription';
 
 const router = express.Router();
 
@@ -138,7 +138,7 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
 }));
 
 // POST /api/resumes/new/pdf - Generate PDF from new resume data without saving
-router.post('/new/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
+router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
@@ -149,9 +149,13 @@ router.post('/new/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
         const { template = 'modern', ...resumeData } = req.body;
         const validatedData = ResumeSchema.parse(resumeData);
 
+        // Check if user is premium, if not restrict to basic template
+        const isPremium = req.user?.isPremium || false;
+        const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, template);
+        const doc = generateResume(validatedData, finalTemplate);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -168,7 +172,7 @@ router.post('/new/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
 }));
 
 // POST /api/resumes/save-and-pdf - Save resume and return PDF
-router.post('/save-and-pdf', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         if (!userId) {
@@ -184,9 +188,13 @@ router.post('/save-and-pdf', ensureAuthenticated, asyncHandler(async (req: any, 
             userId
         } as ResumeData);
 
+        // Check if user is premium, if not restrict to basic template
+        const isPremium = req.user?.isPremium || false;
+        const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, template);
+        const doc = generateResume(validatedData, finalTemplate);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -199,6 +207,47 @@ router.post('/save-and-pdf', ensureAuthenticated, asyncHandler(async (req: any, 
         } else {
             handleDatabaseError(error, res, 'create resume');
         }
+    }
+}));
+
+// GET /api/resumes/:id/download - Download saved resume as PDF (free users allowed)
+router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+        const { template = 'modern' } = req.query;
+
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        const resume = await getResumeById(resumeId, userId);
+
+        if (!resume) {
+            handleNotFound(res, 'Resume');
+            return;
+        }
+
+        // Check if user is premium, if not restrict to basic template
+        const isPremium = req.user?.isPremium || false;
+        const finalTemplate = isPremium ? (template as string) : 'modern'; // Free users get modern template only
+
+        // Generate PDF using template
+        const generateResume = require('../templates');
+        const doc = generateResume(resume, finalTemplate);
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
+
+        doc.pipe(res);
+        doc.end();
+    } catch (error) {
+        handleDatabaseError(error, res, 'generate PDF');
     }
 }));
 
@@ -442,7 +491,7 @@ router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) =>
 }));
 
 // POST /api/resumes/:id/pdf
-router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
+router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
@@ -464,9 +513,13 @@ router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
             return;
         }
 
+        // Check if user is premium, if not restrict to basic template
+        const isPremium = req.user?.isPremium || false;
+        const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(resume, template);
+        const doc = generateResume(resume, finalTemplate);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -478,7 +531,7 @@ router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
     }
 }));
 
-// POST /api/resumes/:id/enhance-pdf
+// POST /api/resumes/:id/enhance-pdf - Keep premium only
 router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
     try {
         const userId = req.user?.sub;
@@ -812,6 +865,33 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             console.error('Response status:', error.response.status);
         }
         res.status(500).json({ error: 'Failed to process resume' });
+    }
+}));
+
+// GET /api/resumes/subscription-status - Check user's subscription status and available features
+router.get('/subscription-status', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        const isPremium = req.user?.isPremium || false;
+
+        res.json({
+            isPremium,
+            availableFeatures: {
+                basicPdfDownload: true, // Free users can download basic PDFs
+                multipleTemplates: isPremium, // Premium users get all templates
+                enhancedPdf: isPremium, // Premium users get enhanced PDFs
+                aiEnhancement: isPremium, // Premium users get AI enhancement
+                unlimitedResumes: isPremium, // Premium users get unlimited resumes
+            },
+            templates: isPremium ? ['modern', 'classic', 'minimal'] : ['modern']
+        });
+    } catch (error) {
+        handleDatabaseError(error, res, 'check subscription status');
     }
 }));
 
