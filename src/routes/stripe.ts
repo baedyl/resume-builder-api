@@ -52,6 +52,44 @@ router.get('/test-userinfo', ensureAuthenticated, asyncHandler(async (req: any, 
     }
 }));
 
+// Clean up invalid customer IDs (development only)
+router.post('/cleanup-customers', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    if (process.env.NODE_ENV !== 'development') {
+        return res.status(403).json({ error: 'This endpoint is only available in development' });
+    }
+    
+    try {
+        const users = await prisma.user.findMany({
+            where: { stripeCustomerId: { not: null } },
+            select: { id: true, stripeCustomerId: true, email: true }
+        });
+        
+        const results = [];
+        for (const user of users) {
+            try {
+                await stripe.customers.retrieve(user.stripeCustomerId!);
+                results.push({ userId: user.id, customerId: user.stripeCustomerId, status: 'valid' });
+            } catch (error: any) {
+                if (error.code === 'resource_missing') {
+                    // Remove invalid customer ID
+                    await prisma.user.update({
+                        where: { id: user.id },
+                        data: { stripeCustomerId: null }
+                    });
+                    results.push({ userId: user.id, customerId: user.stripeCustomerId, status: 'removed' });
+                } else {
+                    results.push({ userId: user.id, customerId: user.stripeCustomerId, status: 'error', error: error.message });
+                }
+            }
+        }
+        
+        res.json({ results });
+    } catch (error) {
+        console.error('Cleanup error:', error);
+        res.status(500).json({ error: 'Cleanup failed' });
+    }
+}));
+
 // Test endpoint to verify Stripe and database configuration
 router.get('/test-config', ensureAuthenticated, asyncHandler(async (req: any, res) => {
     const userId = req.user?.sub;
@@ -188,6 +226,38 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
             }
         } else {
             console.log('Using existing Stripe customer:', customerId);
+            
+            // Verify the customer exists in Stripe
+            try {
+                await stripe.customers.retrieve(customerId);
+                console.log('Stripe customer verified:', customerId);
+            } catch (stripeError: any) {
+                console.error('Stripe customer not found, creating new one:', customerId);
+                console.error('Stripe error:', stripeError.message);
+                
+                // Create new customer
+                const customer = await stripe.customers.create({
+                    metadata: { userId },
+                    email: userEmail
+                });
+                customerId = customer.id;
+                console.log('Created new Stripe customer:', customerId);
+                
+                // Update database with new customer ID
+                try {
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: { 
+                            stripeCustomerId: customerId,
+                            email: userEmail 
+                        }
+                    });
+                    console.log('Database updated with new customer ID');
+                } catch (dbError) {
+                    console.error('Database error updating customer ID:', dbError);
+                    // Continue with Stripe session creation even if DB update fails
+                }
+            }
         }
 
         // Validate price ID
@@ -226,6 +296,12 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
         
         // Return more specific error messages
         if (error.type === 'StripeInvalidRequestError') {
+            if (error.code === 'resource_missing' && error.param === 'customer') {
+                return res.status(400).json({ 
+                    error: 'Invalid customer ID in database', 
+                    details: process.env.NODE_ENV === 'development' ? 'The stored customer ID does not exist in Stripe. Please try again.' : undefined 
+                });
+            }
             return res.status(400).json({ 
                 error: 'Invalid Stripe request', 
                 details: process.env.NODE_ENV === 'development' ? error.message : undefined 
