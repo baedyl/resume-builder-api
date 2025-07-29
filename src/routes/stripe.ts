@@ -229,10 +229,23 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
             
             // Verify the customer exists in Stripe
             try {
-                await stripe.customers.retrieve(customerId);
+                const customer = await stripe.customers.retrieve(customerId);
                 console.log('Stripe customer verified:', customerId);
+                
+                // Check if customer is deleted
+                if ('deleted' in customer && customer.deleted) {
+                    throw new Error('Customer was deleted');
+                }
+                
+                // Type guard to ensure customer is not deleted
+                if ('email' in customer) {
+                    const validCustomer = customer as any;
+                    console.log('Customer details:', { id: validCustomer.id, email: validCustomer.email, deleted: false });
+                } else {
+                    throw new Error('Customer is deleted or invalid');
+                }
             } catch (stripeError: any) {
-                console.error('Stripe customer not found, creating new one:', customerId);
+                console.error('Stripe customer not found or invalid, creating new one:', customerId);
                 console.error('Stripe error:', stripeError.message);
                 
                 // Create new customer
@@ -268,23 +281,74 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
         }
 
         // Create checkout session
-        console.log('Creating Stripe checkout session...');
-        const session = await stripe.checkout.sessions.create({
-            customer: customerId,
-            payment_method_types: ['card'],
-            mode: 'subscription',
-            line_items: [{
-                price: finalPriceId,
-                quantity: 1,
-            }],
-            success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
-            allow_promotion_codes: true,
-            billing_address_collection: 'auto',
-        });
+        console.log('Creating Stripe checkout session with customer:', customerId);
+        try {
+            const session = await stripe.checkout.sessions.create({
+                customer: customerId,
+                payment_method_types: ['card'],
+                mode: 'subscription',
+                line_items: [{
+                    price: finalPriceId,
+                    quantity: 1,
+                }],
+                success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
+                allow_promotion_codes: true,
+                billing_address_collection: 'auto',
+            });
 
-        console.log('Checkout session created successfully:', session.id);
-        res.json({ sessionId: session.id });
+            console.log('Checkout session created successfully:', session.id);
+            res.json({ sessionId: session.id });
+        } catch (sessionError: any) {
+            console.error('Checkout session creation failed:', sessionError.message);
+            
+            // If the error is about the customer, try creating a new customer
+            if (sessionError.code === 'resource_missing' && sessionError.param === 'customer') {
+                console.log('Customer not found in checkout session, creating new customer...');
+                
+                // Create new customer
+                const newCustomer = await stripe.customers.create({
+                    metadata: { userId },
+                    email: userEmail
+                });
+                
+                console.log('Created new customer for checkout:', newCustomer.id);
+                
+                // Update database
+                try {
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: { 
+                            stripeCustomerId: newCustomer.id,
+                            email: userEmail 
+                        }
+                    });
+                } catch (dbError) {
+                    console.error('Database error updating customer ID:', dbError);
+                }
+                
+                // Try creating checkout session again with new customer
+                const retrySession = await stripe.checkout.sessions.create({
+                    customer: newCustomer.id,
+                    payment_method_types: ['card'],
+                    mode: 'subscription',
+                    line_items: [{
+                        price: finalPriceId,
+                        quantity: 1,
+                    }],
+                    success_url: `${process.env.FRONTEND_URL}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+                    cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
+                    allow_promotion_codes: true,
+                    billing_address_collection: 'auto',
+                });
+                
+                console.log('Checkout session created successfully with new customer:', retrySession.id);
+                res.json({ sessionId: retrySession.id });
+            } else {
+                // Re-throw the error to be handled by the outer catch block
+                throw sessionError;
+            }
+        }
     } catch (error: any) {
         console.error('Detailed error creating checkout session:', {
             message: error.message,
