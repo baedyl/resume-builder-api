@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt, { GetPublicKeyOrSecret } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
+import axios from 'axios';
 
 // Ensure environment variables are set at startup
 if (!process.env.AUTH0_DOMAIN || !process.env.AUTH0_AUDIENCE) {
@@ -25,6 +26,21 @@ const getKey: GetPublicKeyOrSecret = (header, callback) => {
     });
 };
 
+// Function to fetch user info from Auth0
+async function fetchUserInfo(accessToken: string): Promise<any> {
+    try {
+        const response = await axios.get(`https://${process.env.AUTH0_DOMAIN}/userinfo`, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        });
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching user info from Auth0:', error);
+        return null;
+    }
+}
+
 // Authentication middleware
 export const ensureAuthenticated = (
     req: any,
@@ -47,13 +63,53 @@ export const ensureAuthenticated = (
             issuer: `https://${process.env.AUTH0_DOMAIN}/`,
             algorithms: ['RS256'],
         },
-        (err: Error | null, decoded: any) => {
+        async (err: Error | null, decoded: any) => {
             if (err) {
                 console.error('Token verification error:', err);
                 res.status(401).json({ error: 'Invalid token' });
             } else {
-                // Assert decoded as the expected type
-                req.user = decoded as { sub: string };
+                // Extract user information from JWT token
+                console.log('JWT decoded payload:', JSON.stringify(decoded, null, 2));
+                
+                // Try multiple possible email fields in Auth0 JWT
+                let email = decoded.email || 
+                           decoded['https://dev-v3pu2a2b.us.auth0.com/email'] ||
+                           decoded['https://dev-v3pu2a2b.us.auth0.com/user/email'] ||
+                           decoded['https://dev-v3pu2a2b.us.auth0.com/userinfo/email'] ||
+                           decoded['email_verified'] ? decoded.email : undefined;
+                
+                // Log all possible email fields for debugging
+                console.log('Email extraction debug:', {
+                    'decoded.email': decoded.email,
+                    'decoded.email_verified': decoded.email_verified,
+                    'decoded.https://dev-v3pu2a2b.us.auth0.com/email': decoded['https://dev-v3pu2a2b.us.auth0.com/email'],
+                    'decoded.https://dev-v3pu2a2b.us.auth0.com/user/email': decoded['https://dev-v3pu2a2b.us.auth0.com/user/email'],
+                    'decoded.https://dev-v3pu2a2b.us.auth0.com/userinfo/email': decoded['https://dev-v3pu2a2b.us.auth0.com/userinfo/email'],
+                    'final_email': email
+                });
+                
+                // If email is not in JWT, try to fetch from Auth0 userinfo endpoint
+                if (!email) {
+                    console.log('Email not found in JWT, fetching from Auth0 userinfo endpoint...');
+                    try {
+                        const userInfo = await fetchUserInfo(token);
+                        if (userInfo && userInfo.email) {
+                            email = userInfo.email;
+                            console.log('Email fetched from userinfo:', email);
+                        } else {
+                            console.log('No email found in userinfo response:', userInfo);
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch userinfo:', error);
+                        // Continue without email - it will be handled in the route
+                    }
+                }
+                
+                req.user = {
+                    sub: decoded.sub,
+                    email: email
+                } as { sub: string; email?: string };
+                console.log('Extracted user info:', req.user);
                 next();
             }
         }

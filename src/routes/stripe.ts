@@ -11,7 +11,46 @@ import {
     handleGenericError 
 } from '../utils/errorHandling';
 
+import axios from 'axios'; // Added for Auth0 userinfo test
+
 const router = express.Router();
+
+// Debug endpoint to test JWT token parsing
+router.get('/debug-token', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    res.json({
+        user: req.user,
+        headers: {
+            authorization: req.headers.authorization ? 'Bearer [HIDDEN]' : 'None'
+        },
+        timestamp: new Date().toISOString()
+    });
+}));
+
+// Test Auth0 userinfo endpoint
+router.get('/test-userinfo', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(400).json({ error: 'No token provided' });
+    }
+    
+    try {
+        const response = await axios.get(`https://${process.env.AUTH0_DOMAIN}/userinfo`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        res.json({
+            userinfo: response.data,
+            success: true
+        });
+    } catch (error: any) {
+        console.error('Userinfo error:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to fetch userinfo',
+            details: error.response?.data || error.message
+        });
+    }
+}));
 
 // Test endpoint to verify Stripe and database configuration
 router.get('/test-config', ensureAuthenticated, asyncHandler(async (req: any, res) => {
@@ -21,7 +60,9 @@ router.get('/test-config', ensureAuthenticated, asyncHandler(async (req: any, re
         stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
         frontendUrlConfigured: !!process.env.FRONTEND_URL,
         priceIdConfigured: !!process.env.STRIPE_PRICE_ID_PREMIUM,
-        userId: userId
+        userId: userId,
+        userEmail: req.user?.email,
+        userObject: req.user
     };
 
     try {
@@ -29,6 +70,15 @@ router.get('/test-config', ensureAuthenticated, asyncHandler(async (req: any, re
         const userCount = await prisma.user.count();
         config.databaseConnected = true;
         config.userTableExists = true;
+        
+        // Check if user exists in database
+        if (userId) {
+            const dbUser = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { email: true, stripeCustomerId: true }
+            });
+            config.dbUser = dbUser;
+        }
     } catch (error: any) {
         config.databaseConnected = false;
         config.userTableExists = false;
@@ -57,6 +107,34 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
         return;
     }
 
+    // Get user email from JWT or database
+    let userEmail = req.user?.email;
+    console.log('Initial user email from JWT:', userEmail);
+    
+    if (!userEmail) {
+        // Try to get email from database
+        const dbUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true }
+        });
+        userEmail = dbUser?.email;
+        console.log('Email from database:', userEmail);
+    }
+    
+    if (!userEmail) {
+        console.error('User email is missing for user:', userId);
+        // For development/testing, create a temporary email
+        if (process.env.NODE_ENV === 'development') {
+            userEmail = `temp-${userId}@example.com`;
+            console.log('Using temporary email for development:', userEmail);
+        } else {
+            return res.status(400).json({ 
+                error: 'User email is required for subscription setup',
+                details: 'Please ensure your Auth0 configuration includes email scope and that the user has an email address.'
+            });
+        }
+    }
+
     // Validate required environment variables
     if (!process.env.STRIPE_SECRET_KEY) {
         console.error('STRIPE_SECRET_KEY is not configured');
@@ -70,6 +148,7 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
 
     try {
         console.log('Creating checkout session for user:', userId);
+        console.log('User email:', userEmail);
         console.log('Price ID:', priceId || process.env.STRIPE_PRICE_ID_PREMIUM);
 
         // Get or create Stripe customer
@@ -78,22 +157,35 @@ router.post('/create-checkout-session', ensureAuthenticated, asyncHandler(async 
 
         if (!customerId) {
             console.log('Creating new Stripe customer for user:', userId);
+            
+            // userEmail is already validated above
+            
             const customer = await stripe.customers.create({
                 metadata: { userId },
-                email: req.user?.email || undefined
+                email: userEmail
             });
             customerId = customer.id;
             console.log('Created Stripe customer:', customerId);
             
-            await prisma.user.upsert({
-                where: { id: userId },
-                update: { stripeCustomerId: customerId },
-                create: { 
-                    id: userId,
-                    email: req.user?.email || '',
-                    stripeCustomerId: customerId 
-                }
-            });
+            // Create or update user in database
+            try {
+                await prisma.user.upsert({
+                    where: { id: userId },
+                    update: { 
+                        stripeCustomerId: customerId,
+                        email: userEmail 
+                    },
+                    create: { 
+                        id: userId,
+                        email: userEmail,
+                        stripeCustomerId: customerId 
+                    }
+                });
+                console.log('User record updated in database');
+            } catch (dbError) {
+                console.error('Database error updating user:', dbError);
+                // Continue with Stripe session creation even if DB update fails
+            }
         } else {
             console.log('Using existing Stripe customer:', customerId);
         }
