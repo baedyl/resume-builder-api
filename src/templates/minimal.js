@@ -1,6 +1,9 @@
 const PDFDocument = require('pdfkit');
+const { getLanguageConfig } = require('../utils/language');
 
-function generateMinimalTemplate(data, doc) {
+function generateMinimalTemplate(data, doc, language = 'en') {
+  const languageConfig = getLanguageConfig(language);
+  
   // ATS-friendly: Use only black text for maximum compatibility
   const textColor = '#000000';
   
@@ -51,7 +54,7 @@ function generateMinimalTemplate(data, doc) {
     doc.font('Helvetica')
        .fontSize(11)
        .fillColor(textColor)
-       .text('Skills: ' + data.skills.map(skill => skill.name).join(', '), {
+       .text(languageConfig.sections.skills + ': ' + data.skills.map(skill => skill.name).join(', '), {
          lineGap: 2
        });
     doc.moveDown(1);
@@ -69,7 +72,7 @@ function generateMinimalTemplate(data, doc) {
   doc.font('Helvetica-Bold')
      .fontSize(11)
      .fillColor(textColor)
-     .text('EXPERIENCE');
+     .text(languageConfig.sections.professionalExperience);
   doc.moveDown(0.5);
   doc.font('Helvetica');
   
@@ -125,7 +128,7 @@ function generateMinimalTemplate(data, doc) {
   doc.font('Helvetica-Bold')
      .fontSize(11)
      .fillColor(textColor)
-     .text('EDUCATION');
+     .text(languageConfig.sections.education);
   doc.moveDown(0.5);
   doc.font('Helvetica');
   
@@ -177,7 +180,7 @@ function generateMinimalTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(11)
        .fillColor(textColor)
-       .text('LANGUAGES');
+       .text(languageConfig.sections.languages);
     doc.moveDown(0.5);
     
     doc.font('Helvetica')
@@ -197,7 +200,7 @@ function generateMinimalTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(11)
        .fillColor(textColor)
-       .text('CERTIFICATIONS');
+       .text(languageConfig.sections.certifications);
     doc.moveDown(0.5);
     
     data.certifications.forEach((cert, index) => {
