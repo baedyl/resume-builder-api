@@ -1,6 +1,9 @@
 const PDFDocument = require('pdfkit');
+const { getLanguageConfig } = require('../utils/language');
 
-function generateModernTemplate(data, doc) {
+function generateModernTemplate(data, doc, language = 'en') {
+  const languageConfig = getLanguageConfig(language);
+  
   // ATS-friendly: Use only black text for maximum compatibility
   const textColor = '#000000';
   
@@ -39,7 +42,7 @@ function generateModernTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('PROFESSIONAL SUMMARY');
+       .text(languageConfig.sections.professionalSummary);
     
     doc.moveDown(0.5);
     doc.font('Helvetica')
@@ -65,7 +68,7 @@ function generateModernTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('SKILLS');
+       .text(languageConfig.sections.skills);
     
     doc.moveDown(0.5);
     doc.font('Helvetica')
@@ -92,7 +95,7 @@ function generateModernTemplate(data, doc) {
   doc.font('Helvetica-Bold')
      .fontSize(12)
      .fillColor(textColor)
-     .text('PROFESSIONAL EXPERIENCE');
+     .text(languageConfig.sections.professionalExperience);
   doc.moveDown(0.5);
 
   data.workExperience.forEach((exp, index) => {
@@ -147,7 +150,7 @@ function generateModernTemplate(data, doc) {
   doc.font('Helvetica-Bold')
      .fontSize(12)
      .fillColor(textColor)
-     .text('EDUCATION');
+     .text(languageConfig.sections.education);
   doc.moveDown(0.5);
 
   data.education.forEach((edu, index) => {
@@ -204,7 +207,7 @@ function generateModernTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('LANGUAGES');
+       .text(languageConfig.sections.languages);
     doc.moveDown(0.5);
     
     doc.font('Helvetica')
@@ -224,7 +227,7 @@ function generateModernTemplate(data, doc) {
     doc.font('Helvetica-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('CERTIFICATIONS');
+       .text(languageConfig.sections.certifications);
     doc.moveDown(0.5);
     
     doc.font('Helvetica')

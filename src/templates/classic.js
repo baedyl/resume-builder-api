@@ -1,6 +1,9 @@
 const PDFDocument = require('pdfkit');
+const { getLanguageConfig } = require('../utils/language');
 
-function generateClassicTemplate(data, doc) {
+function generateClassicTemplate(data, doc, language = 'en') {
+  const languageConfig = getLanguageConfig(language);
+  
   // ATS-friendly: Use only black text for maximum compatibility
   const textColor = '#000000';
   
@@ -39,7 +42,7 @@ function generateClassicTemplate(data, doc) {
     doc.font('Times-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('PROFESSIONAL SUMMARY');
+       .text(languageConfig.sections.professionalSummary);
     
     doc.moveDown(0.5);
     doc.font('Times-Roman')
@@ -65,7 +68,7 @@ function generateClassicTemplate(data, doc) {
     doc.font('Times-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('SKILLS');
+       .text(languageConfig.sections.skills);
     
     doc.moveDown(0.5);
     doc.font('Times-Roman')
@@ -89,7 +92,7 @@ function generateClassicTemplate(data, doc) {
   doc.font('Times-Bold')
      .fontSize(12)
      .fillColor(textColor)
-     .text('PROFESSIONAL EXPERIENCE');
+     .text(languageConfig.sections.professionalExperience);
   doc.moveDown(0.5);
   
   data.workExperience.forEach((exp, index) => {

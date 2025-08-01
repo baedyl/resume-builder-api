@@ -8,7 +8,7 @@ const templates = {
   minimal: generateMinimalTemplate
 };
 
-function generateResume(data, template = 'modern') {
+function generateResume(data, template = 'modern', language = 'en') {
   const PDFDocument = require('pdfkit');
   const doc = new PDFDocument({
     size: 'LETTER',
@@ -23,8 +23,8 @@ function generateResume(data, template = 'modern') {
   // Get the template generator function
   const templateGenerator = templates[template] || templates.modern;
   
-  // Generate the resume using the selected template
-  templateGenerator(data, doc);
+  // Generate the resume using the selected template and language
+  templateGenerator(data, doc, language);
   
   return doc;
 }

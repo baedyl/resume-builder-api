@@ -18,7 +18,7 @@ import {
     LanguageSchema, 
     CertificationSchema 
 } from '../utils/validation';
-import { detectLanguage } from '../utils/language';
+import { detectLanguage, getLanguageConfig, getLanguageInfo } from '../utils/language';
 import { enhanceWithOpenAI } from '../utils/openai';
 import { 
     handleValidationError, 
@@ -53,6 +53,7 @@ const ResumeSchema = z.object({
     education: z.array(EducationSchema).min(1, 'At least one education entry is required'),
     languages: z.array(LanguageSchema).default([]),
     certifications: z.array(CertificationSchema).default([]),
+    language: z.string().optional().default('en'), // Add language parameter
 });
 
 const ResumeUpdateSchema = z.object({
@@ -68,15 +69,18 @@ const ResumeUpdateSchema = z.object({
     education: z.array(EducationSchema).optional(),
     languages: z.array(LanguageSchema).default([]),
     certifications: z.array(CertificationSchema).default([]),
+    language: z.string().optional(), // Add language parameter
 });
 
 const EnhanceDescriptionSchema = z.object({
     jobTitle: z.string().min(1, 'Job title is required'),
     description: z.string().min(1, 'Description is required'),
+    language: z.string().optional().default('en'), // Add language parameter
 });
 
 const EnhanceSummarySchema = z.object({
     summary: z.string().min(1, 'Summary is required'),
+    language: z.string().optional().default('en'), // Add language parameter
 });
 
 // Multer configuration
@@ -101,13 +105,16 @@ const upload = multer({
 router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
     try {
         const parsed = EnhanceSummarySchema.parse(req.body);
-        const { summary } = parsed;
+        const { summary, language = 'en' } = parsed;
+        
+        const languageConfig = getLanguageConfig(language);
+        const languageInfo = getLanguageInfo(language);
 
-        const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. Original summary: ${summary}`;
+        const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. ${languageInfo.instruction} Original summary: ${summary}`;
 
         const enhancedSummary = await enhanceWithOpenAI(
             prompt,
-            'You are a helpful assistant.',
+            languageConfig.systemMessage,
             "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth."
         );
 
@@ -121,13 +128,16 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
 router.post('/enhance-description', asyncHandler(async (req: any, res) => {
     try {
         const parsed = EnhanceDescriptionSchema.parse(req.body);
-        const { jobTitle, description } = parsed;
+        const { jobTitle, description, language = 'en' } = parsed;
+        
+        const languageConfig = getLanguageConfig(language);
+        const languageInfo = getLanguageInfo(language);
 
-        const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. Original: ${description}`;
+        const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. ${languageInfo.instruction} Original: ${description}`;
 
         const enhancedDescription = await enhanceWithOpenAI(
             prompt,
-            'You are a helpful assistant.',
+            languageConfig.systemMessage,
             `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments.`
         );
 
@@ -146,16 +156,16 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
             return;
         }
 
-        const { template = 'modern', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse(resumeData);
+        const { template = 'modern', language = 'en', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse({ ...resumeData, language });
 
         // Check if user is premium, if not restrict to basic template
         const isPremium = req.user?.isPremium || false;
-        const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+        const finalTemplate = isPremium ? template : 'modern';
 
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, finalTemplate);
+        const doc = generateResume(validatedData, finalTemplate, language);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -180,8 +190,8 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             return;
         }
 
-        const { template = 'modern', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse(resumeData);
+        const { template = 'modern', language = 'en', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse({ ...resumeData, language });
 
         const resume = await createResume({
             ...validatedData,
@@ -190,11 +200,11 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
 
         // Check if user is premium, if not restrict to basic template
         const isPremium = req.user?.isPremium || false;
-        const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+        const finalTemplate = isPremium ? template : 'modern';
 
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, finalTemplate);
+        const doc = generateResume(validatedData, finalTemplate, language);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -215,7 +225,7 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'modern' } = req.query;
+        const { template = 'modern', language = 'en' } = req.query;
 
         if (!userId) {
             handleUnauthorized(res);
@@ -235,11 +245,11 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
 
         // Check if user is premium, if not restrict to basic template
         const isPremium = req.user?.isPremium || false;
-        const finalTemplate = isPremium ? (template as string) : 'modern'; // Free users get modern template only
+        const finalTemplate = isPremium ? (template as string) : 'modern';
 
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(resume, finalTemplate);
+        const doc = generateResume(resume, finalTemplate, language as string);
 
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
@@ -536,7 +546,7 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { jobDescription, template = 'modern' } = req.body;
+        const { jobDescription, template = 'modern', language = 'en' } = req.body;
 
         if (!userId) {
             handleUnauthorized(res);
@@ -556,6 +566,10 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
             handleNotFound(res, 'Resume');
             return;
         }
+
+        // Get language configuration
+        const languageConfig = getLanguageConfig(language);
+        const languageInfo = getLanguageInfo(language);
 
         // Prepare resume data for enhancement
         const resumeData: any = {
@@ -591,9 +605,11 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
             })) || [],
         };
 
-        // Detect language and create enhancement prompt
-        const languageInfo = await detectLanguage(jobDescription);
-        const prompt: string = `You are an expert resume writer. Enhance the following resume to best match the provided job description. Use strong, relevant language, optimize for ATS, and tailor the summary, work experience, and skills to the job requirements. ${languageInfo.instruction} Return the enhanced resume as structured JSON in the following format:
+        const prompt: string = `You are an expert resume writer. Enhance the following resume to best match the provided job description. Use strong, relevant language, optimize for ATS, and tailor the summary, work experience, and skills to the job requirements. ${languageInfo.instruction} 
+
+IMPORTANT: For all work experience descriptions, format them as bullet points using the • symbol. Each bullet point should start with a strong action verb and be quantifiable when possible.
+
+Return the enhanced resume as structured JSON in the following format:
 
 {
   fullName,
@@ -625,7 +641,7 @@ ${JSON.stringify(resumeData, null, 2)}
                 const response = await openai.chat.completions.create({
                     model: 'gpt-3.5-turbo',
                     messages: [
-                        { role: 'system', content: 'You are an expert resume writer. Return only valid JSON.' },
+                        { role: 'system', content: languageConfig.systemMessage },
                         { role: 'user', content: prompt },
                     ],
                     temperature: 0.7,
