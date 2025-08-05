@@ -61,10 +61,17 @@ Personal Information:
 
 Please write a compelling, professional cover letter that highlights relevant skills and experience.`;
 
+        // Create language-appropriate fallback content
+        const fallbackContent = languageInfo.code === 'es' 
+            ? 'Estimado Gerente de Contratación,\n\nLe escribo para expresar mi interés en la posición descrita. Con mi formación y experiencia, creo que sería una valiosa adición a su equipo.\n\nGracias por su consideración.\n\nAtentamente,\n[Su Nombre]'
+            : languageInfo.code === 'fr'
+            ? 'Cher Responsable du Recrutement,\n\nJe vous écris pour exprimer mon intérêt pour le poste décrit. Avec ma formation et mon expérience, je pense que je serais un ajout précieux à votre équipe.\n\nMerci pour votre considération.\n\nCordialement,\n[Votre Nom]'
+            : 'Dear Hiring Manager,\n\nI am writing to express my interest in the position described. With my background and experience, I believe I would be a valuable addition to your team.\n\nThank you for your consideration.\n\nSincerely,\n[Your Name]';
+
         const content = await enhanceWithOpenAI(
             prompt,
             systemMessage,
-            'Dear Hiring Manager,\n\nI am writing to express my interest in the position described. With my background and experience, I believe I would be a valuable addition to your team.\n\nThank you for your consideration.\n\nSincerely,\n[Your Name]'
+            fallbackContent
         );
 
         // Save cover letter to database

@@ -112,10 +112,17 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
 
         const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. ${languageInfo.instruction} Original summary: ${summary}`;
 
+        // Create language-appropriate fallback content
+        const fallbackContent = language === 'es' 
+            ? "Un profesional dedicado y versátil con una sólida base en su campo. Historial comprobado de entregar resultados y adaptarse a nuevos desafíos. Comprometido con el aprendizaje continuo y el crecimiento profesional."
+            : language === 'fr'
+            ? "Un professionnel dévoué et polyvalent avec une solide base dans son domaine. Antécédents prouvés de livrer des résultats et s'adapter aux nouveaux défis. Engagé dans l'apprentissage continu et la croissance professionnelle."
+            : "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
+
         const enhancedSummary = await enhanceWithOpenAI(
             prompt,
             languageConfig.systemMessage,
-            "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth."
+            fallbackContent
         );
 
         return res.json({ enhancedSummary });
@@ -135,10 +142,17 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
 
         const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. ${languageInfo.instruction} Original: ${description}`;
 
+        // Create language-appropriate fallback content
+        const fallbackContent = language === 'es' 
+            ? `• Ejecutó responsabilidades principales como ${jobTitle}, mejorando la productividad del equipo y los resultados del proyecto.\n• Colaboró con partes interesadas para lograr objetivos organizacionales, aprovechando habilidades de experiencia previa.\n• Contribuyó a iniciativas clave, adaptándose a entornos de trabajo dinámicos.`
+            : language === 'fr'
+            ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques.`
+            : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments.`;
+
         const enhancedDescription = await enhanceWithOpenAI(
             prompt,
             languageConfig.systemMessage,
-            `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments.`
+            fallbackContent
         );
 
         return res.json({ enhancedDescription });
@@ -605,9 +619,28 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
             })) || [],
         };
 
+        // Extract and match skills from job description
+        console.log('Extracting skills from job description...');
+        const matchedSkills = await extractAndMatchSkills(jobDescription, resume.skills || [], language);
+        console.log(`Found ${matchedSkills.length} matched skills from job description`);
+        
+        // Create enhanced skills list combining matched skills with existing resume skills
+        const enhancedSkills = [...(resume.skills || []), ...matchedSkills];
+        
+        // Remove duplicates based on skill name
+        const uniqueSkills = enhancedSkills.filter((skill, index, self) => 
+            index === self.findIndex(s => s.name.toLowerCase() === skill.name.toLowerCase())
+        );
+        
+        console.log(`Total unique skills for enhancement: ${uniqueSkills.length}`);
+        console.log('Skills to include:', uniqueSkills.map(skill => skill.name));
+
         const prompt: string = `You are an expert resume writer. Enhance the following resume to best match the provided job description. Use strong, relevant language, optimize for ATS, and tailor the summary, work experience, and skills to the job requirements. ${languageInfo.instruction} 
 
-IMPORTANT: For all work experience descriptions, format them as bullet points using the • symbol. Each bullet point should start with a strong action verb and be quantifiable when possible.
+IMPORTANT: 
+1. For all work experience descriptions, format them as bullet points using the • symbol. Each bullet point should start with a strong action verb and be quantifiable when possible.
+2. Include the following matched skills in the skills section: ${uniqueSkills.map(skill => skill.name).join(', ')}
+3. Focus on skills that are relevant to the job description and will help pass ATS systems.
 
 Return the enhanced resume as structured JSON in the following format:
 
@@ -631,6 +664,9 @@ ${jobDescription}
 
 Resume:
 ${JSON.stringify(resumeData, null, 2)}
+
+Matched Skills to Include:
+${uniqueSkills.map(skill => skill.name).join(', ')}
 `;
 
         // Call OpenAI to enhance the resume
@@ -719,7 +755,9 @@ ${JSON.stringify(resumeData, null, 2)}
         return res.json({
             enhanced: enhancedResume,
             resumeId: savedResume.id,
-            message: 'Resume enhanced and saved successfully'
+            message: 'Resume enhanced and saved successfully',
+            matchedSkills: uniqueSkills.map(skill => skill.name),
+            totalSkillsMatched: uniqueSkills.length
         });
     } catch (error: any) {
         console.error('Error in enhance-pdf endpoint:', error);
@@ -910,5 +948,139 @@ router.get('/subscription-status', ensureAuthenticated, withPremiumFeatures, asy
         handleDatabaseError(error, res, 'check subscription status');
     }
 }));
+
+// Function to extract and match skills from job description
+async function extractAndMatchSkills(jobDescription: string, resumeSkills: any[], language: string = 'en') {
+    const languageConfig = getLanguageConfig(language);
+    
+    // Extract keywords/skills from job description using OpenAI
+    const extractionPrompt = `Analyze the following job description and extract the most important technical skills, tools, technologies, and keywords that would be relevant for this position. Focus on:
+1. Programming languages, frameworks, and technologies
+2. Software tools and platforms
+3. Methodologies and processes
+4. Industry-specific skills
+5. Soft skills that are explicitly mentioned
+
+Return only the skills as a JSON array of strings, without any additional text or formatting.
+
+Job Description:
+${jobDescription}`;
+
+    try {
+        const response = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                { role: 'system', content: languageConfig.systemMessage },
+                { role: 'user', content: extractionPrompt },
+            ],
+            temperature: 0.3,
+            max_tokens: 1000,
+        });
+
+        const content = response.choices[0]?.message?.content?.trim();
+        if (!content) {
+            return [];
+        }
+
+        let extractedSkills: string[] = [];
+        try {
+            extractedSkills = JSON.parse(content);
+        } catch (parseError) {
+            console.warn('Failed to parse extracted skills:', parseError);
+            return [];
+        }
+
+        // Get all existing skills from database
+        const allSkills = await prisma.skill.findMany({
+            select: { id: true, name: true }
+        });
+
+        // Get current resume skills
+        const currentResumeSkills = resumeSkills.map(skill => skill.name.toLowerCase());
+
+        // Match extracted skills with existing skills
+        const matchedSkills: any[] = [];
+        const newSkills: string[] = [];
+
+        for (const extractedSkill of extractedSkills) {
+            if (!extractedSkill || typeof extractedSkill !== 'string') {
+                continue;
+            }
+            
+            const normalizedSkill = extractedSkill.toLowerCase().trim();
+            
+            if (normalizedSkill.length === 0) {
+                continue;
+            }
+            
+            // Check if skill exists in database
+            const existingSkill = allSkills.find(skill => 
+                skill.name.toLowerCase() === normalizedSkill
+            );
+
+            if (existingSkill) {
+                matchedSkills.push(existingSkill);
+            } else {
+                // Check if it's already in current resume
+                if (currentResumeSkills.includes(normalizedSkill)) {
+                    // Find the original skill object from resume
+                    const resumeSkill = resumeSkills.find(skill => 
+                        skill.name.toLowerCase() === normalizedSkill
+                    );
+                    if (resumeSkill) {
+                        matchedSkills.push(resumeSkill);
+                    }
+                } else {
+                    newSkills.push(extractedSkill);
+                }
+            }
+        }
+        
+        console.log(`Matched ${matchedSkills.length} existing skills, found ${newSkills.length} new skills`);
+
+        // Add some relevant skills that might be missing but are commonly valuable
+        const additionalSkillsPrompt = `Based on the job description, suggest 3-5 additional relevant skills that would be valuable for this position but might not be explicitly mentioned. These should be complementary skills that would make a candidate more competitive.
+
+Return only the skills as a JSON array of strings.
+
+Job Description:
+${jobDescription}`;
+
+        const additionalResponse = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages: [
+                { role: 'system', content: languageConfig.systemMessage },
+                { role: 'user', content: additionalSkillsPrompt },
+            ],
+            temperature: 0.5,
+            max_tokens: 500,
+        });
+
+        const additionalContent = additionalResponse.choices[0]?.message?.content?.trim();
+        if (additionalContent) {
+            try {
+                const additionalSkills = JSON.parse(additionalContent);
+                newSkills.push(...additionalSkills);
+            } catch (parseError) {
+                console.warn('Failed to parse additional skills:', parseError);
+            }
+        }
+
+        // Process new skills and add them to matched skills
+        if (newSkills.length > 0) {
+            const processedNewSkills = await processSkills(
+                newSkills.map(name => ({ name }))
+            );
+            matchedSkills.push(...processedNewSkills);
+        }
+
+        return matchedSkills;
+    } catch (error) {
+        console.error('Error extracting skills from job description:', error);
+        // Fallback: return original resume skills if extraction fails
+        console.log('Using fallback: returning original resume skills');
+        return resumeSkills;
+    }
+}
 
 export default router;
