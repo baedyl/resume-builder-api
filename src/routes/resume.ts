@@ -125,7 +125,7 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
             fallbackContent
         );
 
-        return res.json({ enhancedSummary });
+        return res.json({ data: enhancedSummary });
     } catch (error) {
         handleValidationError(error, res);
     }
@@ -140,14 +140,14 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
         const languageConfig = getLanguageConfig(language);
         const languageInfo = getLanguageInfo(language);
 
-        const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. ${languageInfo.instruction} Original: ${description}`;
+        const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. Format with single line breaks between bullet points, no extra spacing. ${languageInfo.instruction} Original: ${description}`;
 
         // Create language-appropriate fallback content
         const fallbackContent = language === 'es' 
-            ? `• Ejecutó responsabilidades principales como ${jobTitle}, mejorando la productividad del equipo y los resultados del proyecto.\n• Colaboró con partes interesadas para lograr objetivos organizacionales, aprovechando habilidades de experiencia previa.\n• Contribuyó a iniciativas clave, adaptándose a entornos de trabajo dinámicos.`
+            ? `• Ejecutó responsabilidades principales como ${jobTitle}, mejorando la productividad del equipo y los resultados del proyecto.\n• Colaboró con partes interesadas para lograr objetivos organizacionales, aprovechando habilidades de experiencia previa.\n• Contribuyó a iniciativas clave, adaptándose a entornos de trabajo dinámicos`
             : language === 'fr'
-            ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques.`
-            : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments.`;
+            ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques`
+            : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments`;
 
         const enhancedDescription = await enhanceWithOpenAI(
             prompt,
@@ -155,7 +155,7 @@ router.post('/enhance-description', asyncHandler(async (req: any, res) => {
             fallbackContent
         );
 
-        return res.json({ enhancedDescription });
+        return res.json({ data: enhancedDescription });
     } catch (error) {
         handleValidationError(error, res);
     }
