@@ -41,33 +41,39 @@ const router = express.Router();
 
 async function resolveChromeExecutablePath(puppeteer: any): Promise<string | undefined> {
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
-        return process.env.PUPPETEER_EXECUTABLE_PATH;
+        const fs = require('fs');
+        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) return process.env.PUPPETEER_EXECUTABLE_PATH;
     }
-    // Try Render default cache location
-    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    // Try common Render cache locations for @puppeteer/browsers
     try {
         const fs = require('fs');
         const path = require('path');
-        if (fs.existsSync(cacheDir)) {
+        const candidateCacheRoots = [
+            process.env.PUPPETEER_CACHE_DIR,
+            '/opt/render/.cache/puppeteer',
+            '/opt/render/project/.cache/puppeteer',
+            process.env.HOME ? `${process.env.HOME}/.cache/puppeteer` : undefined,
+            '/root/.cache/puppeteer'
+        ].filter(Boolean) as string[];
+        for (const cacheDir of candidateCacheRoots) {
+            if (!fs.existsSync(cacheDir)) continue;
             const chromeRoot = path.join(cacheDir, 'chrome');
-            if (fs.existsSync(chromeRoot)) {
-                const versions = fs.readdirSync(chromeRoot).sort();
-                // Pick the latest version folder
-                for (let i = versions.length - 1; i >= 0; i--) {
-                    const verDir = path.join(chromeRoot, versions[i]);
-                    // Newer layout
-                    const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
-                    if (fs.existsSync(linux64)) return linux64;
-                    const linux = path.join(verDir, 'chrome-linux', 'chrome');
-                    if (fs.existsSync(linux)) return linux;
-                }
+            if (!fs.existsSync(chromeRoot)) continue;
+            const versions = fs.readdirSync(chromeRoot).sort();
+            for (let i = versions.length - 1; i >= 0; i--) {
+                const verDir = path.join(chromeRoot, versions[i]);
+                const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
+                if (fs.existsSync(linux64)) return linux64;
+                const linux = path.join(verDir, 'chrome-linux', 'chrome');
+                if (fs.existsSync(linux)) return linux;
             }
         }
-    } catch (_) {
-        // Ignore and fall back
-    }
+    } catch (_) { /* ignore */ }
     try {
-        return await puppeteer.executablePath();
+        const path = await puppeteer.executablePath();
+        const fs = require('fs');
+        if (path && fs.existsSync(path)) return path;
+        return undefined;
     } catch (_) {
         return undefined;
     }
@@ -1004,11 +1010,12 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
         const executablePath = await resolveChromeExecutablePath(puppeteer);
-        const browser = await puppeteer.launch({ 
+        const launchOptions: any = {
             headless: true,
-            executablePath,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        });
+        };
+        if (executablePath) launchOptions.executablePath = executablePath;
+        const browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
         
         // Set content and wait for rendering
@@ -1097,11 +1104,12 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
         const executablePath = await resolveChromeExecutablePath(puppeteer);
-        const browser = await puppeteer.launch({ 
+        const launchOptions2: any = {
             headless: true,
-            executablePath,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        });
+        };
+        if (executablePath) launchOptions2.executablePath = executablePath;
+        const browser = await puppeteer.launch(launchOptions2);
         const page = await browser.newPage();
         
         // Set content and wait for rendering
