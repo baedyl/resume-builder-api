@@ -19,6 +19,28 @@ import {
 
 const router = express.Router();
 
+function sendPdfDocument(res: express.Response, doc: any, filename: string): void {
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => {
+        const pdfBuffer = Buffer.concat(chunks);
+        if (!res.headersSent) {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length.toString());
+        }
+        res.end(pdfBuffer);
+    });
+    doc.on('error', () => {
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to generate PDF' });
+        } else {
+            try { res.end(); } catch (_) { /* noop */ }
+        }
+    });
+    doc.end();
+}
+
 // Validation schemas using shared components
 const CoverLetterGenerateSchema = z.object({
     jobDescription: z.string().min(1, 'Job description is required'),
@@ -298,11 +320,7 @@ router.post('/:id/pdf', ensureAuthenticated, requirePremium, asyncHandler(async 
                lineGap: 3
            });
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="cover-letter.pdf"');
-
-        doc.pipe(res);
-        doc.end();
+        sendPdfDocument(res, doc, 'cover-letter.pdf');
     } catch (error) {
         handleDatabaseError(error, res, 'generate cover letter PDF');
     }
