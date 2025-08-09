@@ -39,6 +39,40 @@ import { requirePremium, withPremiumFeatures } from '../middleware/subscription'
 
 const router = express.Router();
 
+async function resolveChromeExecutablePath(puppeteer: any): Promise<string | undefined> {
+    if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
+        return process.env.PUPPETEER_EXECUTABLE_PATH;
+    }
+    // Try Render default cache location
+    const cacheDir = process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer';
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        if (fs.existsSync(cacheDir)) {
+            const chromeRoot = path.join(cacheDir, 'chrome');
+            if (fs.existsSync(chromeRoot)) {
+                const versions = fs.readdirSync(chromeRoot).sort();
+                // Pick the latest version folder
+                for (let i = versions.length - 1; i >= 0; i--) {
+                    const verDir = path.join(chromeRoot, versions[i]);
+                    // Newer layout
+                    const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
+                    if (fs.existsSync(linux64)) return linux64;
+                    const linux = path.join(verDir, 'chrome-linux', 'chrome');
+                    if (fs.existsSync(linux)) return linux;
+                }
+            }
+        }
+    } catch (_) {
+        // Ignore and fall back
+    }
+    try {
+        return await puppeteer.executablePath();
+    } catch (_) {
+        return undefined;
+    }
+}
+
 // Helper to send PDFKit documents reliably by buffering and setting Content-Length
 function sendPdfDocument(res: express.Response, doc: any, filename: string): void {
     const chunks: Buffer[] = [];
@@ -969,9 +1003,11 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
 
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
+        const executablePath = await resolveChromeExecutablePath(puppeteer);
         const browser = await puppeteer.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            executablePath,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         });
         const page = await browser.newPage();
         
@@ -1060,9 +1096,11 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
 
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
+        const executablePath = await resolveChromeExecutablePath(puppeteer);
         const browser = await puppeteer.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            executablePath,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         });
         const page = await browser.newPage();
         
