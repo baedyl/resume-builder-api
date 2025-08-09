@@ -34,9 +34,33 @@ import {
     processLanguages,
     type ResumeData 
 } from '../services/resumeService';
+import { generateHTMLResume } from '../services/htmlResumeService';
 import { requirePremium, withPremiumFeatures } from '../middleware/subscription';
 
 const router = express.Router();
+
+// Helper to send PDFKit documents reliably by buffering and setting Content-Length
+function sendPdfDocument(res: express.Response, doc: any, filename: string): void {
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => {
+        const pdfBuffer = Buffer.concat(chunks);
+        if (!res.headersSent) {
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.setHeader('Content-Length', pdfBuffer.length.toString());
+        }
+        res.end(pdfBuffer);
+    });
+    doc.on('error', () => {
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to generate PDF' });
+        } else {
+            try { res.end(); } catch (_) { /* noop */ }
+        }
+    });
+    doc.end();
+}
 
 // Enhanced schemas using shared components
 const ResumeSchema = z.object({
@@ -177,20 +201,73 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern';
 
+        // Ensure skills are properly formatted for PDF template
+        const pdfData = {
+            ...validatedData,
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || []
+        };
+
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, language);
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
-
-        doc.pipe(res);
-        doc.end();
+        sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
         if (error instanceof z.ZodError) {
             handleValidationError(error, res);
         } else {
             handleDatabaseError(error, res, 'generate PDF');
+        }
+    }
+}));
+
+// POST /api/resumes/new/html - Generate HTML from new resume data without saving
+router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        const { template = 'colorful', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse(resumeData);
+
+        // Convert validated data to HTML format
+        const htmlResumeData = {
+            fullName: validatedData.fullName,
+            email: validatedData.email,
+            phone: validatedData.phone || undefined,
+            address: validatedData.address || undefined,
+            linkedIn: validatedData.linkedIn || undefined,
+            website: validatedData.website || undefined,
+            summary: validatedData.summary || '',
+            workExperience: validatedData.workExperience.map(exp => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })),
+            education: validatedData.education.map(edu => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })),
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: validatedData.languages || [],
+        };
+
+        const html = generateHTMLResume(htmlResumeData, template as string);
+
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'generate HTML');
         }
     }
 }));
@@ -216,15 +293,17 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern';
 
+        // Ensure skills are properly formatted for PDF template
+        const pdfData = {
+            ...validatedData,
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || []
+        };
+
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(validatedData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, language);
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
-
-        doc.pipe(res);
-        doc.end();
+        sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
         if (error instanceof z.ZodError) {
             handleValidationError(error, res);
@@ -265,11 +344,7 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
         const generateResume = require('../templates');
         const doc = generateResume(resume, finalTemplate, language as string);
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
-
-        doc.pipe(res);
-        doc.end();
+        sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
         handleDatabaseError(error, res, 'generate PDF');
     }
@@ -541,15 +616,37 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
 
+        // Convert resume data to PDF format
+        const pdfData = {
+            fullName: resume.fullName,
+            email: resume.email,
+            phone: resume.phone || undefined,
+            address: resume.address || undefined,
+            linkedIn: resume.linkedIn || undefined,
+            website: resume.website || undefined,
+            summary: resume.summary || '',
+            workExperience: resume.workExperiences?.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })) || [],
+            education: resume.educations?.map((edu: any) => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })) || [],
+            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: resume.languages || [],
+        };
+
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(resume, finalTemplate);
+        const doc = generateResume(pdfData, finalTemplate);
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
-
-        doc.pipe(res);
-        doc.end();
+        sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
         handleDatabaseError(error, res, 'generate PDF');
     }
@@ -762,6 +859,239 @@ ${uniqueSkills.map(skill => skill.name).join(', ')}
     } catch (error: any) {
         console.error('Error in enhance-pdf endpoint:', error);
         res.status(500).json({ error: 'Failed to enhance resume' });
+    }
+}));
+
+// POST /api/resumes/:id/html - Get resume as HTML
+router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+        const { template = 'colorful' } = req.query;
+
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        const resume = await getResumeById(resumeId, userId);
+        if (!resume) {
+            handleNotFound(res, 'Resume');
+            return;
+        }
+
+        // Convert resume data to HTML format
+        const resumeData = {
+            fullName: resume.fullName,
+            email: resume.email,
+            phone: resume.phone || undefined,
+            address: resume.address || undefined,
+            linkedIn: resume.linkedIn || undefined,
+            website: resume.website || undefined,
+            summary: resume.summary || '',
+            workExperience: resume.workExperiences?.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })) || [],
+            education: resume.educations?.map((edu: any) => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })) || [],
+            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: resume.languages || [],
+        };
+
+        const html = generateHTMLResume(resumeData, template as string);
+
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+    } catch (error: any) {
+        console.error('Error in HTML resume endpoint:', error);
+        res.status(500).json({ error: 'Failed to generate HTML resume' });
+    }
+}));
+
+// POST /api/resumes/save-and-html-pdf - Save new resume and return PDF from HTML template
+router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        const { template = 'colorful', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse(resumeData);
+
+        // Save the resume to database first
+        const resume = await createResume({
+            ...validatedData,
+            userId
+        } as ResumeData);
+
+        // Convert resume data to HTML format
+        const htmlResumeData = {
+            fullName: validatedData.fullName,
+            email: validatedData.email,
+            phone: validatedData.phone || undefined,
+            address: validatedData.address || undefined,
+            linkedIn: validatedData.linkedIn || undefined,
+            website: validatedData.website || undefined,
+            summary: validatedData.summary || '',
+            workExperience: validatedData.workExperience.map(exp => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })),
+            education: validatedData.education.map(edu => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })),
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: validatedData.languages || [],
+        };
+
+        // Generate HTML
+        const html = generateHTMLResume(htmlResumeData, template as string);
+
+        // Convert HTML to PDF using Puppeteer
+        const puppeteer = require('puppeteer');
+        const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        
+        // Set content and wait for rendering
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        
+        // Generate PDF
+        const pdf = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: {
+                top: '20mm',
+                right: '20mm',
+                bottom: '20mm',
+                left: '20mm'
+            }
+        });
+
+        await browser.close();
+
+        // Return PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
+        res.setHeader('Content-Length', Buffer.byteLength(pdf).toString());
+        res.end(pdf);
+
+    } catch (error) {
+        if (error instanceof z.ZodError) {
+            handleValidationError(error, res);
+        } else {
+            handleDatabaseError(error, res, 'generate HTML PDF');
+        }
+    }
+}));
+
+// POST /api/resumes/:id/html-pdf - Convert existing resume to PDF using HTML template
+router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+    try {
+        const userId = req.user?.sub;
+        const resumeId = parseInt(req.params.id, 10);
+        const { template = 'colorful' } = req.body;
+
+        if (!userId) {
+            handleUnauthorized(res);
+            return;
+        }
+
+        if (isNaN(resumeId)) {
+            return res.status(400).json({ error: 'Invalid resume ID' });
+        }
+
+        const resume = await getResumeById(resumeId, userId);
+        if (!resume) {
+            handleNotFound(res, 'Resume');
+            return;
+        }
+
+        // Convert resume data to HTML format
+        const resumeData = {
+            fullName: resume.fullName,
+            email: resume.email,
+            phone: resume.phone || undefined,
+            address: resume.address || undefined,
+            linkedIn: resume.linkedIn || undefined,
+            website: resume.website || undefined,
+            summary: resume.summary || '',
+            workExperience: resume.workExperiences?.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })) || [],
+            education: resume.educations?.map((edu: any) => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })) || [],
+            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: resume.languages || [],
+        };
+
+        // Generate HTML
+        const html = generateHTMLResume(resumeData, template as string);
+
+        // Convert HTML to PDF using Puppeteer
+        const puppeteer = require('puppeteer');
+        const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+        const page = await browser.newPage();
+        
+        // Set content and wait for rendering
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        
+        // Generate PDF
+        const pdf = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: {
+                top: '20mm',
+                right: '20mm',
+                bottom: '20mm',
+                left: '20mm'
+            }
+        });
+
+        await browser.close();
+
+        // Return PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
+        res.setHeader('Content-Length', Buffer.byteLength(pdf).toString());
+        res.end(pdf);
+
+    } catch (error: any) {
+        console.error('Error in HTML PDF endpoint:', error);
+        res.status(500).json({ error: 'Failed to generate HTML PDF' });
     }
 }));
 

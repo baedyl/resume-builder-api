@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{fullName}} - Resume</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Georgia', 'Times New Roman', serif; color: #111; background: #fff; line-height: 1.4; }
+    .container { max-width: 800px; margin: 0 auto; padding: 40px; }
+    .header { border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 18px; }
+    .name { font-size: 28px; font-weight: bold; letter-spacing: 0.3px; }
+    .title { font-size: 14px; margin-top: 6px; color: #333; }
+    .contacts { font-size: 12px; margin-top: 10px; color: #222; }
+    .contacts span { margin-right: 14px; }
+    .section { margin-top: 22px; }
+    .section-title { font-size: 14px; letter-spacing: 1px; font-weight: bold; color: #000; border-bottom: 1px solid #000; padding-bottom: 4px; margin-bottom: 10px; }
+    .entry { margin-bottom: 16px; }
+    .job-title { font-weight: bold; font-size: 13px; color: #000; }
+    .company { font-size: 12px; color: #333; margin-top: 2px; }
+    .dates { font-size: 11px; color: #333; }
+    .task { font-size: 11px; margin-top: 4px; }
+    .task::before { content: '• '; }
+    .summary-text { font-size: 12px; margin-top: 8px; }
+    .skills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .skill { border: 1px solid #000; padding: 2px 6px; font-size: 10px; border-radius: 2px; }
+    .lang { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .lang-name { width: 90px; font-weight: bold; font-size: 11px; }
+  </style>
+  </head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="name">{{fullName}}</div>
+      {{#headline}}<div class="title">{{headline}}</div>{{/headline}}
+      <div class="contacts">
+        {{#phone}}<span>{{phone}}</span>{{/phone}}
+        {{#email}}<span>{{email}}</span>{{/email}}
+        {{#linkedIn}}<span>{{linkedIn}}</span>{{/linkedIn}}
+        {{#address}}<span>{{address}}</span>{{/address}}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">EXPERIENCE</div>
+      {{#workExperience}}
+      <div class="entry">
+        <div class="job-title">{{jobTitle}}</div>
+        <div class="company">{{company}} <span class="dates">| {{startDate}} - {{endDate}}</span></div>
+        {{#tasks}}<div class="task">{{.}}</div>{{/tasks}}
+      </div>
+      {{/workExperience}}
+    </div>
+
+    <div class="section">
+      <div class="section-title">EDUCATION</div>
+      {{#education}}
+      <div class="entry">
+        <div class="job-title">{{degree}}</div>
+        <div class="company">{{institution}}</div>
+        <div class="dates">{{graduationYear}}</div>
+      </div>
+      {{/education}}
+    </div>
+
+    <div class="section">
+      <div class="section-title">SUMMARY</div>
+      <div class="summary-text">{{summary}}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">LANGUAGES</div>
+      {{#languages}}
+      <div class="lang">
+        <div class="lang-name">{{name}}</div>
+        <div class="dates">{{proficiency}}</div>
+      </div>
+      {{/languages}}
+    </div>
+
+    <div class="section">
+      <div class="section-title">SKILLS</div>
+      <div class="skills">
+        {{#skills}}<div class="skill">{{name}}</div>{{/skills}}
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
