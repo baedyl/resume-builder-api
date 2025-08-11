@@ -80,6 +80,34 @@ function generateClassicTemplate(data, doc, language = 'en') {
     doc.moveDown(1);
   }
 
+  // Languages
+  if (data.languages.length > 0) {
+    doc.moveDown(1);
+    // Add separator before Languages section
+    doc.strokeColor(textColor)
+       .lineWidth(1)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Times-Bold')
+       .fontSize(12)
+       .fillColor(textColor)
+       .text('LANGUAGES');
+    doc.moveDown(0.5);
+    
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor);
+    
+    data.languages.forEach(lang => {
+      doc.text(`${lang.name} - ${lang.proficiency}`, {
+        lineGap: 2
+      });
+    });
+  }
+
   // Work Experience
   // Add separator before Professional Experience section
   doc.strokeColor(textColor)
@@ -185,34 +213,6 @@ function generateClassicTemplate(data, doc, language = 'en') {
          });
     }
   });
-
-  // Languages
-  if (data.languages.length > 0) {
-    doc.moveDown(1);
-    // Add separator before Languages section
-    doc.strokeColor(textColor)
-       .lineWidth(1)
-       .moveTo(50, doc.y)
-       .lineTo(545, doc.y)
-       .stroke();
-    doc.moveDown(1);
-    
-    doc.font('Times-Bold')
-       .fontSize(12)
-       .fillColor(textColor)
-       .text('LANGUAGES');
-    doc.moveDown(0.5);
-    
-    doc.font('Times-Roman')
-       .fontSize(11)
-       .fillColor(textColor);
-    
-    data.languages.forEach(lang => {
-      doc.text(`${lang.name} - ${lang.proficiency}`, {
-        lineGap: 2
-      });
-    });
-  }
 
   // Certifications
   if (data.certifications.length > 0) {

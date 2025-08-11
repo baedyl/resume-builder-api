@@ -42,6 +42,28 @@
     </div>
 
     <div class="section">
+      <div class="section-title">SUMMARY</div>
+      <div class="summary-text">{{summary}}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">SKILLS</div>
+      <div class="skills">
+        {{#skills}}<div class="skill">{{name}}</div>{{/skills}}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">LANGUAGES</div>
+      {{#languages}}
+      <div class="lang">
+        <div class="lang-name">{{name}}</div>
+        <div class="dates">{{proficiency}}</div>
+      </div>
+      {{/languages}}
+    </div>
+
+    <div class="section">
       <div class="section-title">EXPERIENCE</div>
       {{#workExperience}}
       <div class="entry">
@@ -61,28 +83,6 @@
         <div class="dates">{{graduationYear}}</div>
       </div>
       {{/education}}
-    </div>
-
-    <div class="section">
-      <div class="section-title">SUMMARY</div>
-      <div class="summary-text">{{summary}}</div>
-    </div>
-
-    <div class="section">
-      <div class="section-title">LANGUAGES</div>
-      {{#languages}}
-      <div class="lang">
-        <div class="lang-name">{{name}}</div>
-        <div class="dates">{{proficiency}}</div>
-      </div>
-      {{/languages}}
-    </div>
-
-    <div class="section">
-      <div class="section-title">SKILLS</div>
-      <div class="skills">
-        {{#skills}}<div class="skill">{{name}}</div>{{/skills}}
-      </div>
     </div>
   </div>
 </body>

@@ -60,6 +60,34 @@ function generateMinimalTemplate(data, doc, language = 'en') {
     doc.moveDown(1);
   }
 
+  // Languages
+  if (data.languages.length > 0) {
+    doc.moveDown(1);
+    // Add separator before Languages section
+    doc.strokeColor(textColor)
+       .lineWidth(0.5)
+       .moveTo(50, doc.y)
+       .lineTo(545, doc.y)
+       .stroke();
+    doc.moveDown(1);
+    
+    doc.font('Helvetica-Bold')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(languageConfig.sections.languages);
+    doc.moveDown(0.5);
+    
+    doc.font('Helvetica')
+       .fontSize(11)
+       .fillColor(textColor);
+    
+    data.languages.forEach(lang => {
+      doc.text(`${lang.name} - ${lang.proficiency}`, {
+        lineGap: 2
+      });
+    });
+  }
+
   // Work Experience
   // Add separator before Experience section
   doc.strokeColor(textColor)
@@ -165,34 +193,6 @@ function generateMinimalTemplate(data, doc, language = 'en') {
          });
     }
   });
-
-  // Languages
-  if (data.languages.length > 0) {
-    doc.moveDown(1);
-    // Add separator before Languages section
-    doc.strokeColor(textColor)
-       .lineWidth(0.5)
-       .moveTo(50, doc.y)
-       .lineTo(545, doc.y)
-       .stroke();
-    doc.moveDown(1);
-    
-    doc.font('Helvetica-Bold')
-       .fontSize(11)
-       .fillColor(textColor)
-       .text(languageConfig.sections.languages);
-    doc.moveDown(0.5);
-    
-    doc.font('Helvetica')
-       .fontSize(11)
-       .fillColor(textColor);
-    
-    data.languages.forEach(lang => {
-      doc.text(`${lang.name} - ${lang.proficiency}`, {
-        lineGap: 2
-      });
-    });
-  }
 
   // Certifications
   if (data.certifications.length > 0) {
