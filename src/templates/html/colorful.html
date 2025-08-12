@@ -228,7 +228,7 @@
     <div class="two-column-layout">
       <div class="left-column">
         <div class="experience">
-          <div class="section-title">EXPERIENCE</div>
+          <div class="section-title">{{titles.professionalExperience}}</div>
           {{#workExperience}}
           <div class="experience-entry">
             <div class="job-title">{{jobTitle}}</div>
@@ -242,7 +242,7 @@
           {{/workExperience}}
         </div>
 
-        <div class="section-title">EDUCATION</div>
+        <div class="section-title">{{titles.education}}</div>
         {{#education}}
         <div class="education">
           {{#.}}
@@ -258,11 +258,11 @@
 
       <div class="right-column">
         <div class="summary">
-          <div class="section-title">SUMMARY</div>
+          <div class="section-title">{{titles.professionalSummary}}</div>
           <div class="summary-content">{{summary}}</div>
         </div>
 
-        <div class="section-title">LANGUAGES</div>
+        <div class="section-title">{{titles.languages}}</div>
         {{#languages}}
         <div class="languages">
           {{#.}}
@@ -279,7 +279,7 @@
         </div>
         {{/languages}}
 
-        <div class="section-title">SKILLS</div>
+        <div class="section-title">{{titles.skills}}</div>
         <div class="skills">
           <div class="skills-grid">
             {{#skills}}

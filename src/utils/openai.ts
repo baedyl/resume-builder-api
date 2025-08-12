@@ -1,4 +1,5 @@
 import { openai } from '../lib/openai';
+import { getLanguageInfo } from './language';
 
 export interface OpenAIOptions {
     model?: string;
@@ -61,3 +62,32 @@ export async function enhanceWithOpenAI(
         return fallbackContent;
     }
 } 
+
+/**
+ * Translate a given text to the target language using OpenAI.
+ * Keeps technical terms and proper nouns when appropriate.
+ */
+export async function translateText(
+    text: string,
+    targetLanguageCode: string
+): Promise<string> {
+    if (!text || text.trim().length === 0) return text;
+    const languageInfo = getLanguageInfo(targetLanguageCode);
+    const targetName = languageInfo.name || 'French';
+    const systemMessage = 'You are a professional translator. Return only the translated text.';
+    const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.
+
+Text:
+${text}`;
+    try {
+        const result = await callOpenAIWithRetry(prompt, systemMessage, {
+            model: 'gpt-3.5-turbo',
+            temperature: 0.2,
+            maxTokens: Math.min(Math.max(text.length * 2, 200), 1200),
+            maxRetries: 2,
+        });
+        return (result || text).trim();
+    } catch (e) {
+        return text;
+    }
+}

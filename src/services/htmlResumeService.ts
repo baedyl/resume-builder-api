@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import Mustache from 'mustache';
+import { getLanguageConfig } from '../utils/language';
 
 export interface ResumeData {
   fullName: string;
@@ -63,12 +64,14 @@ function formatDate(date: string | Date): string {
   return d.getFullYear().toString();
 }
 
-export function generateHTMLResume(data: ResumeData, templateName: string = 'colorful'): string {
+export function generateHTMLResume(data: ResumeData, templateName: string = 'colorful', language: string = 'en'): string {
   const template = getTemplate(templateName);
+  const languageConfig = getLanguageConfig(language);
   
   // Process data for template
   const processedData = {
     ...data,
+    titles: languageConfig.sections,
     headline: (data as any).title || (data as any).profession || (data as any).role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
     languagesLine: (data.languages || [])
       .map(l => `${l.name}: ${l.proficiency}`)

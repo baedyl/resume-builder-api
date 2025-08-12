@@ -50,7 +50,7 @@
     <div class="grid">
       <div>
         <div class="section">
-          <h3>EXPERIENCE</h3>
+          <h3>{{titles.professionalExperience}}</h3>
           {{#workExperience}}
           <div class="entry">
             <div class="job">{{jobTitle}}</div>
@@ -61,7 +61,7 @@
         </div>
 
         <div class="section">
-          <h3>EDUCATION</h3>
+          <h3>{{titles.education}}</h3>
           {{#education}}
           <div class="entry">
             <div class="job">{{degree}}</div>
@@ -74,12 +74,12 @@
 
       <div>
         <div class="section">
-          <h3>SUMMARY</h3>
+          <h3>{{titles.professionalSummary}}</h3>
           <div class="bullet" style="margin-top:0">{{summary}}</div>
         </div>
 
         <div class="section">
-          <h3>LANGUAGES</h3>
+          <h3>{{titles.languages}}</h3>
           {{#languages}}
           <div class="lang">
             <div class="lang-name">{{name}}</div>
@@ -93,7 +93,7 @@
         </div>
 
         <div class="section">
-          <h3>SKILLS</h3>
+          <h3>{{titles.skills}}</h3>
           <div class="skills">
             {{#skills}}<div class="chip">{{name}}</div>{{/skills}}
           </div>

@@ -94,7 +94,7 @@ function generateClassicTemplate(data, doc, language = 'en') {
     doc.font('Times-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('LANGUAGES');
+       .text(languageConfig.sections.languages);
     doc.moveDown(0.5);
     
     doc.font('Times-Roman')
@@ -177,7 +177,7 @@ function generateClassicTemplate(data, doc, language = 'en') {
   doc.font('Times-Bold')
      .fontSize(12)
      .fillColor(textColor)
-     .text('EDUCATION');
+     .text(languageConfig.sections.education);
   doc.moveDown(0.5);
   
   data.education.forEach((edu, index) => {
@@ -220,7 +220,7 @@ function generateClassicTemplate(data, doc, language = 'en') {
     doc.font('Times-Bold')
        .fontSize(12)
        .fillColor(textColor)
-       .text('CERTIFICATIONS');
+       .text(languageConfig.sections.certifications);
     doc.moveDown(0.5);
     
     data.certifications.forEach((cert, index) => {

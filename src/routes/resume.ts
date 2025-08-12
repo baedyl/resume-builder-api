@@ -19,6 +19,7 @@ import {
     CertificationSchema 
 } from '../utils/validation';
 import { detectLanguage, getLanguageConfig, getLanguageInfo } from '../utils/language';
+import { translateText } from '../utils/openai';
 import { enhanceWithOpenAI } from '../utils/openai';
 import { 
     handleValidationError, 
@@ -270,8 +271,8 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             return;
         }
 
-        const { template = 'colorful', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse(resumeData);
+        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse({ ...resumeData, language });
 
         // Convert validated data to HTML format
         const htmlResumeData = {
@@ -299,7 +300,19 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             languages: validatedData.languages || [],
         };
 
-        const html = generateHTMLResume(htmlResumeData, template as string);
+        // Determine effective language: prefer provided, else detect from content
+        let effectiveLanguage = validatedData.language || 'en';
+        if (!req.body.language) {
+            try {
+                const basis = (validatedData.summary || '') || (validatedData.workExperience?.[0]?.description || '');
+                if (basis) {
+                    const detected = await detectLanguage(basis);
+                    if (detected?.code) effectiveLanguage = detected.code;
+                }
+            } catch {}
+        }
+
+        const html = generateHTMLResume(htmlResumeData, template as string, effectiveLanguage);
 
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
@@ -505,6 +518,39 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         const processedSkills = await processSkills(validatedData.skills);
         const processedLanguages = await processLanguages(validatedData.languages);
 
+        // If language is explicitly set to French, translate provided textual fields
+        if (validatedData.language && validatedData.language.toLowerCase() === 'fr') {
+            if (validatedData.summary) {
+                validatedData.summary = await translateText(validatedData.summary, 'fr');
+            }
+            if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+                validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
+                    ...exp,
+                    jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, 'fr') : exp.jobTitle,
+                    company: exp.company, // company names typically unchanged
+                    location: exp.location ? await translateText(exp.location, 'fr') : exp.location,
+                    description: exp.description ? await translateText(exp.description, 'fr') : exp.description,
+                })));
+            }
+            if (validatedData.education && validatedData.education.length > 0) {
+                validatedData.education = await Promise.all(validatedData.education.map(async (edu) => ({
+                    ...edu,
+                    degree: edu.degree ? await translateText(edu.degree, 'fr') : edu.degree,
+                    major: edu.major ? await translateText(edu.major, 'fr') : edu.major,
+                    institution: edu.institution, // proper noun
+                    description: edu.description ? await translateText(edu.description, 'fr') : edu.description,
+                })));
+            }
+            if (validatedData.certifications && validatedData.certifications.length > 0) {
+                validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => ({
+                    ...cert,
+                    name: cert.name ? await translateText(cert.name, 'fr') : cert.name,
+                    issuer: cert.issuer, // proper noun
+                })));
+            }
+            // Skills and language labels are often proper nouns; keep as provided
+        }
+
         // Update the resume with cascade updates
         const updateData: any = {};
         
@@ -634,7 +680,7 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'modern' } = req.body;
+        const { template = 'modern', language: reqLanguage } = req.body;
 
         if (!userId) {
             handleUnauthorized(res);
@@ -683,8 +729,20 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         };
 
         // Generate PDF using template
+        // Determine language: use provided or detect from content
+        let effectiveLanguage = (reqLanguage as string) || 'en';
+        try {
+            if (!reqLanguage) {
+                const basis = resume.summary || resume.workExperiences?.[0]?.description || '';
+                if (basis && basis.length > 0) {
+                    const detected = await detectLanguage(basis);
+                    if (detected?.code) effectiveLanguage = detected.code;
+                }
+            }
+        } catch {}
+
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate);
+        const doc = generateResume(pdfData, finalTemplate, effectiveLanguage);
 
         sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
@@ -907,7 +965,7 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'colorful' } = req.query;
+        const { template = 'colorful', language = 'en' } = req.query as any;
 
         if (!userId) {
             handleUnauthorized(res);
@@ -950,7 +1008,19 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             languages: resume.languages || [],
         };
 
-        const html = generateHTMLResume(resumeData, template as string);
+        // Determine effective language for preview: prefer query param, else detect
+        let effectiveLanguage = (language as string) || 'en';
+        if (!req.query.language) {
+            try {
+                const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
+                if (basis) {
+                    const detected = await detectLanguage(basis);
+                    if (detected?.code) effectiveLanguage = detected.code;
+                }
+            } catch {}
+        }
+
+        const html = generateHTMLResume(resumeData, template as string, effectiveLanguage);
 
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
@@ -969,8 +1039,8 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             return;
         }
 
-        const { template = 'colorful', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse(resumeData);
+        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
+        const validatedData = ResumeSchema.parse({ ...resumeData, language });
 
         // Save the resume to database first
         const resume = await createResume({
@@ -1005,7 +1075,18 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         };
 
         // Generate HTML
-        const html = generateHTMLResume(htmlResumeData, template as string);
+        // Determine effective language: prefer provided, else detect from summary/experience
+        let effectiveLanguage = (language as string) || 'en';
+        if (!req.body.language) {
+            try {
+                const basis = (validatedData.summary || '') || (validatedData.workExperience?.[0]?.description || '');
+                if (basis) {
+                    const detected = await detectLanguage(basis);
+                    if (detected?.code) effectiveLanguage = detected.code;
+                }
+            } catch {}
+        }
+        const html = generateHTMLResume(htmlResumeData, template as string, effectiveLanguage);
 
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
@@ -1055,7 +1136,7 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'colorful' } = req.body;
+        const { template = 'colorful', language = 'en' } = req.body;
 
         if (!userId) {
             handleUnauthorized(res);
@@ -1099,7 +1180,18 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         };
 
         // Generate HTML
-        const html = generateHTMLResume(resumeData, template as string);
+        // Determine effective language: prefer provided, else detect from saved content
+        let effectiveLanguage = (language as string) || 'en';
+        if (!req.body.language) {
+            try {
+                const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
+                if (basis) {
+                    const detected = await detectLanguage(basis);
+                    if (detected?.code) effectiveLanguage = detected.code;
+                }
+            } catch {}
+        }
+        const html = generateHTMLResume(resumeData, template as string, effectiveLanguage);
 
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
