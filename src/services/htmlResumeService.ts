@@ -26,6 +26,7 @@ export interface ResumeData {
   }>;
   skills: Array<{ name: string }>;
   languages: Array<{ name: string; proficiency: string }>;
+  certifications?: Array<{ name: string; issuer?: string; issueDate?: string | Date }>;
 }
 
 function getTemplate(templateName: string): string {
@@ -72,6 +73,7 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
   const processedData = {
     ...data,
     titles: languageConfig.sections,
+    showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0,
     headline: (data as any).title || (data as any).profession || (data as any).role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
     languagesLine: (data.languages || [])
       .map(l => `${l.name}: ${l.proficiency}`)
@@ -95,7 +97,11 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
       ...edu,
       graduationYear: edu.graduationYear?.toString()
     })),
-    languages: data.languages.map(processLanguageProficiency)
+    languages: data.languages.map(processLanguageProficiency),
+    certifications: (data.certifications || []).map(cert => ({
+      ...cert,
+      issueDate: cert.issueDate ? formatDate(cert.issueDate) : undefined
+    }))
   };
   
   return Mustache.render(template, processedData);

@@ -298,6 +298,11 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             })),
             skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
             languages: validatedData.languages || [],
+            certifications: validatedData.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
         };
 
         // Determine effective language: prefer provided, else detect from content
@@ -393,9 +398,40 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? (template as string) : 'modern';
 
+        // Build data in the shape expected by templates
+        const pdfData = {
+            fullName: resume.fullName,
+            email: resume.email,
+            phone: resume.phone || undefined,
+            address: resume.address || undefined,
+            linkedIn: resume.linkedIn || undefined,
+            website: resume.website || undefined,
+            summary: resume.summary || '',
+            workExperience: resume.workExperiences?.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+            })) || [],
+            education: resume.educations?.map((edu: any) => ({
+                degree: edu.degree,
+                institution: edu.institution,
+                graduationYear: edu.graduationYear,
+                description: edu.description,
+            })) || [],
+            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: resume.languages || [],
+            certifications: resume.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
+        };
+
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(resume, finalTemplate, language as string);
+        const doc = generateResume(pdfData, finalTemplate, language as string);
 
         sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
@@ -726,6 +762,11 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
             })) || [],
             skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
             languages: resume.languages || [],
+            certifications: resume.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
         };
 
         // Generate PDF using template
@@ -1006,6 +1047,11 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             })) || [],
             skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
             languages: resume.languages || [],
+            certifications: resume.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
         };
 
         // Determine effective language for preview: prefer query param, else detect
@@ -1072,6 +1118,11 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             })),
             skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
             languages: validatedData.languages || [],
+            certifications: validatedData.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
         };
 
         // Generate HTML
@@ -1177,6 +1228,11 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             })) || [],
             skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
             languages: resume.languages || [],
+            certifications: resume.certifications?.map((cert: any) => ({
+                name: cert.name,
+                issuer: cert.issuer,
+                issueDate: cert.issueDate || null,
+            })) || [],
         };
 
         // Generate HTML

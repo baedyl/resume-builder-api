@@ -98,6 +98,19 @@
             {{#skills}}<div class="chip">{{name}}</div>{{/skills}}
           </div>
         </div>
+
+        {{#showCertifications}}
+        <div class="section">
+          <h3>{{titles.certifications}}</h3>
+          {{#certifications}}
+          <div class="entry">
+            <div class="job">{{name}}</div>
+            {{#issuer}}<div class="company">{{issuer}}</div>{{/issuer}}
+            {{#issueDate}}<div class="dates">{{issueDate}}</div>{{/issueDate}}
+          </div>
+          {{/certifications}}
+        </div>
+        {{/showCertifications}}
       </div>
     </div>
   </div>

@@ -84,6 +84,19 @@
       </div>
       {{/education}}
     </div>
+
+    {{#showCertifications}}
+    <div class="section">
+      <div class="section-title">{{titles.certifications}}</div>
+      {{#certifications}}
+      <div class="entry">
+        <div class="job-title">{{name}}</div>
+        {{#issuer}}<div class="company">{{issuer}}</div>{{/issuer}}
+        {{#issueDate}}<div class="dates">{{issueDate}}</div>{{/issueDate}}
+      </div>
+      {{/certifications}}
+    </div>
+    {{/showCertifications}}
   </div>
 </body>
 </html>

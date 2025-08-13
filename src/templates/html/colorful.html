@@ -287,6 +287,19 @@
             {{/skills}}
           </div>
         </div>
+
+        {{#showCertifications}}
+        <div class="section-title">{{titles.certifications}}</div>
+        <div class="education">
+          {{#certifications}}
+          <div class="education-entry">
+            <div class="degree">{{name}}</div>
+            {{#issuer}}<div class="institution">{{issuer}}</div>{{/issuer}}
+            {{#issueDate}}<div class="graduation-year">{{issueDate}}</div>{{/issueDate}}
+          </div>
+          {{/certifications}}
+        </div>
+        {{/showCertifications}}
       </div>
     </div>
   </div>
