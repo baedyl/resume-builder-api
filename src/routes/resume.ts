@@ -554,37 +554,100 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         const processedSkills = await processSkills(validatedData.skills);
         const processedLanguages = await processLanguages(validatedData.languages);
 
-        // If language is explicitly set to French, translate provided textual fields
-        if (validatedData.language && validatedData.language.toLowerCase() === 'fr') {
+        // Handle translation when user wants to change the resume language
+        // This will translate content from its detected source language to the target language specified in the request
+        if (validatedData.language) {
+            const targetLanguage = validatedData.language.toLowerCase();
+            
+            // Detect source language from the content being updated
+            let sourceLanguage = 'en'; // default to English
             if (validatedData.summary) {
-                validatedData.summary = await translateText(validatedData.summary, 'fr');
+                try {
+                    const detected = await detectLanguage(validatedData.summary);
+                    sourceLanguage = detected.code;
+                } catch (error) {
+                    console.warn('Language detection failed, defaulting to English:', error);
+                }
+            } else if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+                try {
+                    const firstExp = validatedData.workExperience[0];
+                    const textToDetect = [firstExp.jobTitle, firstExp.description].filter(Boolean).join(' ');
+                    if (textToDetect) {
+                        const detected = await detectLanguage(textToDetect);
+                        sourceLanguage = detected.code;
+                    }
+                } catch (error) {
+                    console.warn('Language detection failed, defaulting to English:', error);
+                }
             }
-            if (validatedData.workExperience && validatedData.workExperience.length > 0) {
-                validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
-                    ...exp,
-                    jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, 'fr') : exp.jobTitle,
-                    company: exp.company, // company names typically unchanged
-                    location: exp.location ? await translateText(exp.location, 'fr') : exp.location,
-                    description: exp.description ? await translateText(exp.description, 'fr') : exp.description,
-                })));
+
+            // Only translate if source and target languages are different
+            if (sourceLanguage !== targetLanguage) {
+                console.log(`Translating resume content from ${sourceLanguage} to ${targetLanguage}`);
+                console.log(`Source language detected from: ${validatedData.summary ? 'summary' : 'work experience'}`);
+                
+                // Fields that get translated:
+                // - Summary, job titles, descriptions, degrees, certifications
+                // - Skills (technical terms that might benefit from translation)
+                // - Language proficiency levels (e.g., "Fluent" -> "Courant")
+                
+                // Fields that are preserved (typically proper nouns):
+                // - Company names, institution names, issuer names
+                // - Language names (e.g., "English", "French")
+                
+                if (validatedData.summary) {
+                    validatedData.summary = await translateText(validatedData.summary, targetLanguage);
+                }
+                
+                if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
+                        ...exp,
+                        jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, targetLanguage) : exp.jobTitle,
+                        company: exp.company, // company names typically unchanged
+                        location: exp.location ? await translateText(exp.location, targetLanguage) : exp.location,
+                        description: exp.description ? await translateText(exp.description, targetLanguage) : exp.description,
+                    })));
+                }
+                
+                if (validatedData.education && validatedData.education.length > 0) {
+                    validatedData.education = await Promise.all(validatedData.education.map(async (edu) => ({
+                        ...edu,
+                        degree: edu.degree ? await translateText(edu.degree, targetLanguage) : edu.degree,
+                        major: edu.major ? await translateText(edu.major, targetLanguage) : edu.major,
+                        institution: edu.institution, // proper noun
+                        description: edu.description ? await translateText(edu.description, targetLanguage) : edu.description,
+                    })));
+                }
+                
+                if (validatedData.certifications && validatedData.certifications.length > 0) {
+                    validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => ({
+                        ...cert,
+                        name: cert.name ? await translateText(cert.name, targetLanguage) : cert.name,
+                        issuer: cert.issuer, // proper noun
+                    })));
+                }
+                
+                // Translate skills (technical terms, but some might benefit from translation)
+                if (validatedData.skills && validatedData.skills.length > 0) {
+                    validatedData.skills = await Promise.all(validatedData.skills.map(async (skill) => ({
+                        ...skill,
+                        name: skill.name ? await translateText(skill.name, targetLanguage) : skill.name,
+                    })));
+                }
+                
+                // Translate language proficiency levels
+                if (validatedData.languages && validatedData.languages.length > 0) {
+                    validatedData.languages = await Promise.all(validatedData.languages.map(async (lang) => ({
+                        ...lang,
+                        name: lang.name, // language names are typically kept as-is (e.g., "English", "French")
+                        proficiency: lang.proficiency ? await translateText(lang.proficiency, targetLanguage) : lang.proficiency,
+                    })));
+                }
+                
+                console.log(`Translation completed for ${targetLanguage}`);
+            } else {
+                console.log(`No translation needed: content is already in ${targetLanguage}`);
             }
-            if (validatedData.education && validatedData.education.length > 0) {
-                validatedData.education = await Promise.all(validatedData.education.map(async (edu) => ({
-                    ...edu,
-                    degree: edu.degree ? await translateText(edu.degree, 'fr') : edu.degree,
-                    major: edu.major ? await translateText(edu.major, 'fr') : edu.major,
-                    institution: edu.institution, // proper noun
-                    description: edu.description ? await translateText(edu.description, 'fr') : edu.description,
-                })));
-            }
-            if (validatedData.certifications && validatedData.certifications.length > 0) {
-                validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => ({
-                    ...cert,
-                    name: cert.name ? await translateText(cert.name, 'fr') : cert.name,
-                    issuer: cert.issuer, // proper noun
-                })));
-            }
-            // Skills and language labels are often proper nouns; keep as provided
         }
 
         // Update the resume with cascade updates
