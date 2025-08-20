@@ -686,7 +686,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     company: exp.company,
                     location: exp.location,
                     startDate: new Date(exp.startDate),
-                    endDate: exp.endDate ? new Date(exp.endDate) : null,
+                    endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
                     description: exp.description,
                 })),
             };
@@ -1026,7 +1026,7 @@ ${uniqueSkills.map(skill => skill.name).join(', ')}
                         company: exp.company,
                         location: exp.location,
                         startDate: new Date(exp.startDate),
-                        endDate: exp.endDate ? new Date(exp.endDate) : null,
+                        endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
                         description: exp.description,
                     })),
                 },

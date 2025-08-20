@@ -61,7 +61,19 @@ function processLanguageProficiency(language: { name: string; proficiency: strin
 
 function formatDate(date: string | Date): string {
   if (!date) return '';
+  
+  // Handle "Present" case for current jobs
+  if (typeof date === 'string' && date.toLowerCase() === 'present') {
+    return 'Present';
+  }
+  
   const d = new Date(date);
+  
+  // Check if the date is valid
+  if (isNaN(d.getTime())) {
+    return 'Present'; // Fallback for invalid dates
+  }
+  
   return d.getFullYear().toString();
 }
 
@@ -84,7 +96,7 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
     workExperience: data.workExperience.map(exp => ({
       ...exp,
       startDate: formatDate(exp.startDate),
-      endDate: exp.endDate ? formatDate(exp.endDate) : 'Present',
+      endDate: exp.endDate && exp.endDate !== 'Present' ? formatDate(exp.endDate) : 'Present',
       tasks: (() => {
         const raw = String(exp.description || '');
         const parts = raw.includes('•') ? raw.split('•') : raw.split('.');

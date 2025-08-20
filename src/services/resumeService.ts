@@ -81,7 +81,7 @@ export async function createResume(data: ResumeData) {
             company: exp.company,
             location: exp.location,
             startDate: new Date(exp.startDate),
-            endDate: exp.endDate ? new Date(exp.endDate) : null,
+            endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
             description: exp.description,
         };
     });
