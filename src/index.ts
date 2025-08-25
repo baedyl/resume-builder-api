@@ -20,7 +20,27 @@ app.use(cors({
 }));
 
 // IMPORTANT: Stripe webhook must come BEFORE express.json() to handle raw body
-app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }), stripeRouter);
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req: any, res: any) => {
+    const sig = req.headers['stripe-signature'] as string;
+    let event: any;
+
+    try {
+        const stripe = require('./lib/stripe').stripe;
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+    } catch (err: any) {
+        console.log(`Webhook signature verification failed.`, err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Import and handle the webhook event
+    const { handleWebhookEvent } = require('./routes/stripe');
+    handleWebhookEvent(event).then(() => {
+        res.json({ received: true });
+    }).catch((error: any) => {
+        console.error('Webhook handling error:', error);
+        res.status(500).json({ error: 'Webhook handling failed' });
+    });
+});
 
 // Now add JSON parsing for other routes
 app.use(express.json());

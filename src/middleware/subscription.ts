@@ -36,10 +36,46 @@ export const requirePremium = async (req: AuthenticatedRequest, res: Response, n
                          user.subscriptionEnd && 
                          new Date(user.subscriptionEnd) > new Date());
 
+        // Add debugging information
+        console.log('Subscription middleware check for user:', userId);
+        console.log('User subscription data:', {
+            planType: user.planType,
+            subscriptionStatus: user.subscriptionStatus,
+            subscriptionEnd: user.subscriptionEnd,
+            isPremium
+        });
+
         if (!isPremium) {
+            console.log('User rejected by subscription middleware');
+            
+            // Check if subscription has expired
+            let errorMessage = 'Premium subscription required';
+            let details = null;
+            
+            if (user.subscriptionStatus === 'expired') {
+                errorMessage = 'Your premium subscription has expired';
+                details = {
+                    expiredDate: user.subscriptionEnd,
+                    message: 'Please renew your subscription to continue accessing premium features.'
+                };
+            } else if (user.subscriptionEnd && new Date(user.subscriptionEnd) < new Date()) {
+                errorMessage = 'Your premium subscription has expired';
+                details = {
+                    expiredDate: user.subscriptionEnd,
+                    message: 'Your subscription ended on ' + new Date(user.subscriptionEnd).toLocaleDateString() + '. Please renew to continue.'
+                };
+            }
+            
             return res.status(403).json({ 
-                error: 'Premium subscription required',
-                upgradeUrl: '/upgrade' 
+                error: errorMessage,
+                upgradeUrl: '/upgrade',
+                details: details,
+                debug: {
+                    planType: user.planType,
+                    subscriptionStatus: user.subscriptionStatus,
+                    subscriptionEnd: user.subscriptionEnd,
+                    currentTime: new Date().toISOString()
+                }
             });
         }
 
@@ -81,6 +117,15 @@ export const withPremiumFeatures = async (req: AuthenticatedRequest, res: Respon
                          user.subscriptionStatus === 'active' &&
                          user.subscriptionEnd && 
                          new Date(user.subscriptionEnd) > new Date());
+
+        // Add debugging information
+        console.log('withPremiumFeatures middleware check for user:', userId);
+        console.log('User subscription data:', {
+            planType: user.planType,
+            subscriptionStatus: user.subscriptionStatus,
+            subscriptionEnd: user.subscriptionEnd,
+            isPremium
+        });
 
         // Add premium status to request object
         if (req.user) {

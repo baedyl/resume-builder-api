@@ -10,7 +10,7 @@ import {
     handleUnauthorized, 
     handleGenericError 
 } from '../utils/errorHandling';
-import { debugUserSubscription, listUsersWithSubscriptionIssues } from '../utils/subscriptionDebug';
+import { debugUserSubscription, listUsersWithSubscriptionIssues, checkAndFixExpiredSubscriptions, checkAndFixUserSubscription } from '../utils/subscriptionDebug';
 
 import axios from 'axios'; // Added for Auth0 userinfo test
 
@@ -244,11 +244,171 @@ router.post('/debug-subscription', ensureAuthenticated, asyncHandler(async (req:
     }
     
     try {
-        const result = await debugUserSubscription(userId);
-        res.json(result);
+        // First, try to get the user from database
+        const dbUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                stripeCustomerId: true,
+                subscriptionId: true,
+                subscriptionStatus: true,
+                planType: true,
+                subscriptionStart: true,
+                subscriptionEnd: true
+            }
+        });
+        
+        if (!dbUser) {
+            return res.json({ error: 'User not found in database' });
+        }
+        
+        console.log('Database user:', dbUser);
+        
+        if (!dbUser.stripeCustomerId) {
+            return res.json({ error: 'No Stripe customer ID found' });
+        }
+        
+        // Get customer from Stripe
+        const customer = await stripe.customers.retrieve(dbUser.stripeCustomerId);
+        console.log('Stripe customer:', {
+            id: customer.id,
+            email: 'email' in customer ? (customer as any).email : 'N/A',
+            deleted: 'deleted' in customer ? (customer as any).deleted : false,
+            metadata: 'metadata' in customer ? (customer as any).metadata : {}
+        });
+        
+        // Check if customer is deleted or has issues
+        if ('deleted' in customer && customer.deleted) {
+            console.log('Customer is deleted in Stripe');
+            return res.json({ 
+                error: 'Customer is deleted in Stripe',
+                details: 'The Stripe customer associated with this user has been deleted',
+                customerId: dbUser.stripeCustomerId
+            });
+        }
+        
+        // Also check for any subscription history or events
+        console.log('Checking customer subscription history...');
+        
+        // Get subscriptions for this customer
+        const subscriptions = await stripe.subscriptions.list({
+            customer: dbUser.stripeCustomerId,
+            limit: 10,
+            status: 'all' // Include all statuses for debugging
+        });
+        
+        // Also check for any payment intents or charges to see if there's payment activity
+        try {
+            const charges = await stripe.charges.list({
+                customer: dbUser.stripeCustomerId,
+                limit: 5
+            });
+            console.log(`Found ${charges.data.length} charges for customer`);
+            
+            if (charges.data.length > 0) {
+                console.log('Recent charges:', charges.data.map(charge => ({
+                    id: charge.id,
+                    amount: charge.amount,
+                    status: charge.status,
+                    created: new Date(charge.created * 1000)
+                })));
+            }
+        } catch (chargeError) {
+            console.log('Could not retrieve charges:', chargeError);
+        }
+        
+        console.log(`Found ${subscriptions.data.length} subscriptions`);
+        
+        // Log all subscriptions for debugging
+        if (subscriptions.data.length > 0) {
+            console.log('All subscriptions found:');
+            subscriptions.data.forEach((sub, index) => {
+                const subData = sub as any; // Type assertion for Stripe subscription
+                console.log(`Subscription ${index + 1}:`, {
+                    id: sub.id,
+                    status: sub.status,
+                    current_period_start: subData.current_period_start ? new Date(subData.current_period_start * 1000) : 'N/A',
+                    current_period_end: subData.current_period_end ? new Date(subData.current_period_end * 1000) : 'N/A',
+                    cancel_at_period_end: subData.cancel_at_period_end,
+                    trial_end: subData.trial_end ? new Date(subData.trial_end * 1000) : 'N/A'
+                });
+            });
+        }
+        
+        const activeSubscription = subscriptions.data.find(sub => sub.status === 'active');
+        if (activeSubscription) {
+            console.log('Active subscription found:', {
+                id: activeSubscription.id,
+                status: activeSubscription.status,
+                current_period_start: new Date((activeSubscription as any).current_period_start * 1000),
+                current_period_end: new Date((activeSubscription as any).current_period_end * 1000)
+            });
+            
+            // Fix the user's subscription status
+            await prisma.user.update({
+                where: { id: userId },
+                data: {
+                    subscriptionId: activeSubscription.id,
+                    subscriptionStatus: activeSubscription.status,
+                    planType: 'premium',
+                    subscriptionStart: new Date((activeSubscription as any).current_period_start * 1000),
+                    subscriptionEnd: new Date((activeSubscription as any).current_period_end * 1000)
+                }
+            });
+            
+            console.log('User subscription status fixed!');
+            return res.json({
+                success: true,
+                message: 'Subscription status fixed',
+                subscription: {
+                    id: activeSubscription.id,
+                    status: activeSubscription.status,
+                    planType: 'premium'
+                }
+            });
+        } else {
+            // Check if there are any subscriptions with other statuses that might be relevant
+            const relevantSubscriptions = subscriptions.data.filter(sub => 
+                ['trialing', 'past_due', 'canceled', 'incomplete', 'incomplete_expired'].includes(sub.status)
+            );
+            
+            if (relevantSubscriptions.length > 0) {
+                console.log('Found relevant subscriptions with non-active status:');
+                relevantSubscriptions.forEach(sub => {
+                    console.log(`Status: ${sub.status}, ID: ${sub.id}`);
+                });
+                
+                return res.json({ 
+                    error: 'No active subscriptions found',
+                    details: 'Found subscriptions with other statuses',
+                                    subscriptions: relevantSubscriptions.map(sub => {
+                    const subData = sub as any; // Type assertion for Stripe subscription
+                    return {
+                        id: sub.id,
+                        status: sub.status,
+                        current_period_end: subData.current_period_end ? new Date(subData.current_period_end * 1000) : null
+                    };
+                })
+                });
+            }
+            
+            console.log('No subscriptions found at all');
+            return res.json({ 
+                error: 'No active subscriptions found',
+                details: 'No subscriptions found for this customer in Stripe',
+                customerId: dbUser.stripeCustomerId,
+                databaseStatus: {
+                    planType: dbUser.planType,
+                    subscriptionStatus: dbUser.subscriptionStatus,
+                    subscriptionEnd: dbUser.subscriptionEnd
+                }
+            });
+        }
+        
     } catch (error) {
-        console.error('Debug subscription error:', error);
-        res.status(500).json({ error: 'Failed to debug subscription' });
+        console.error('Error debugging subscription:', error);
+        return res.status(500).json({ error: 'Failed to debug subscription' });
     }
 }));
 
@@ -260,6 +420,52 @@ router.get('/list-subscription-issues', ensureAuthenticated, asyncHandler(async 
     } catch (error) {
         console.error('List subscription issues error:', error);
         res.status(500).json({ error: 'Failed to list subscription issues' });
+    }
+}));
+
+// Check and fix expired subscriptions (admin only)
+router.post('/check-expired-subscriptions', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    try {
+        const results = await checkAndFixExpiredSubscriptions();
+        res.json(results);
+    } catch (error) {
+        console.error('Check expired subscriptions error:', error);
+        res.status(500).json({ error: 'Failed to check expired subscriptions' });
+    }
+}));
+
+// Check and fix individual user subscription
+router.post('/check-user-subscription', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    const userId = req.user?.sub;
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+    }
+    
+    try {
+        // Get user from database
+        const dbUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                email: true,
+                stripeCustomerId: true,
+                subscriptionId: true,
+                subscriptionStatus: true,
+                planType: true,
+                subscriptionStart: true,
+                subscriptionEnd: true
+            }
+        });
+        
+        if (!dbUser) {
+            return res.json({ error: 'User not found in database' });
+        }
+        
+        const result = await checkAndFixUserSubscription(dbUser);
+        res.json(result);
+    } catch (error) {
+        console.error('Check user subscription error:', error);
+        res.status(500).json({ error: 'Failed to check user subscription' });
     }
 }));
 
@@ -620,26 +826,7 @@ router.post('/cancel-subscription', ensureAuthenticated, asyncHandler(async (req
     }
 }));
 
-// Stripe webhook handler
-router.post('/webhook', (req: any, res: any) => {
-    const sig = req.headers['stripe-signature'] as string;
-    let event: any;
 
-    try {
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-    } catch (err: any) {
-        console.log(`Webhook signature verification failed.`, err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    // Handle the event
-    handleWebhookEvent(event).then(() => {
-        res.json({ received: true });
-    }).catch((error) => {
-        console.error('Webhook handling error:', error);
-        res.status(500).json({ error: 'Webhook handling failed' });
-    });
-});
 
 async function handleWebhookEvent(event: any) {
     console.log('Processing webhook event:', event.type);
@@ -835,9 +1022,32 @@ async function handleSubscriptionCancellation(subscription: any) {
             return;
         }
         
-        if (customer.metadata?.userId) {
+        const userId = customer.metadata?.userId;
+        if (!userId) {
+            console.error('No userId in customer metadata');
+            return;
+        }
+        
+        // Check if user exists in database, if not create them
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+        
+        if (!existingUser) {
+            console.log('Creating new user record for subscription cancellation:', userId);
+            await prisma.user.create({
+                data: {
+                    id: userId,
+                    email: 'email' in customer ? (customer as any).email : `user-${userId}@example.com`,
+                    stripeCustomerId: customerId,
+                    subscriptionStatus: 'canceled',
+                    planType: 'free',
+                    subscriptionEnd: new Date(),
+                }
+            });
+        } else {
             await prisma.user.update({
-                where: { id: customer.metadata.userId },
+                where: { id: userId },
                 data: {
                     subscriptionStatus: 'canceled',
                     planType: 'free',
@@ -879,19 +1089,35 @@ async function handleInvoiceCreated(invoice: any) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         console.log('Retrieved subscription for invoice created:', subscription.id, subscription.status);
         
-        // Update user in database with subscription details
-        await prisma.user.update({
-            where: { id: userId },
-            data: {
-                subscriptionId: subscription.id,
-                subscriptionStatus: subscription.status,
-                planType: subscription.status === 'active' ? 'premium' : 'free',
-                subscriptionStart: new Date((subscription as any).current_period_start * 1000),
-                subscriptionEnd: new Date((subscription as any).current_period_end * 1000),
-                stripeCustomerId: customerId,
-                email: 'email' in customer ? (customer as any).email : undefined
-            }
+        // Check if user exists in database, if not create them
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId }
         });
+        
+        const updateData = {
+            subscriptionId: subscription.id,
+            subscriptionStatus: subscription.status,
+            planType: subscription.status === 'active' ? 'premium' : 'free',
+            subscriptionStart: new Date((subscription as any).current_period_start * 1000),
+            subscriptionEnd: new Date((subscription as any).current_period_end * 1000),
+            stripeCustomerId: customerId,
+            email: 'email' in customer ? (customer as any).email : (existingUser?.email || `user-${userId}@example.com`)
+        };
+        
+        if (!existingUser) {
+            console.log('Creating new user record for invoice created:', userId);
+            await prisma.user.create({
+                data: {
+                    id: userId,
+                    ...updateData
+                }
+            });
+        } else {
+            await prisma.user.update({
+                where: { id: userId },
+                data: updateData
+            });
+        }
         
         console.log('User subscription updated successfully for invoice created, user:', userId);
     } catch (error) {
@@ -928,19 +1154,35 @@ async function handlePaymentSuccess(invoice: any) {
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         console.log('Retrieved subscription for payment success:', subscription.id, subscription.status);
         
-        // Update user in database with subscription details
-        await prisma.user.update({
-            where: { id: userId },
-            data: {
-                subscriptionId: subscription.id,
-                subscriptionStatus: subscription.status,
-                planType: subscription.status === 'active' ? 'premium' : 'free',
-                subscriptionStart: new Date((subscription as any).current_period_start * 1000),
-                subscriptionEnd: new Date((subscription as any).current_period_end * 1000),
-                stripeCustomerId: customerId,
-                email: 'email' in customer ? (customer as any).email : undefined
-            }
+        // Check if user exists in database, if not create them
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId }
         });
+        
+        const updateData = {
+            subscriptionId: subscription.id,
+            subscriptionStatus: subscription.status,
+            planType: subscription.status === 'active' ? 'premium' : 'free',
+            subscriptionStart: new Date((subscription as any).current_period_start * 1000),
+            subscriptionEnd: new Date((subscription as any).current_period_end * 1000),
+            stripeCustomerId: customerId,
+            email: 'email' in customer ? (customer as any).email : (existingUser?.email || `user-${userId}@example.com`)
+        };
+        
+        if (!existingUser) {
+            console.log('Creating new user record for payment success:', userId);
+            await prisma.user.create({
+                data: {
+                    id: userId,
+                    ...updateData
+                }
+            });
+        } else {
+            await prisma.user.update({
+                where: { id: userId },
+                data: updateData
+            });
+        }
         
         console.log('User subscription updated successfully for payment success, user:', userId);
     } catch (error) {
@@ -959,9 +1201,30 @@ async function handlePaymentFailure(invoice: any) {
             return;
         }
         
-        if (customer.metadata?.userId) {
+        const userId = customer.metadata?.userId;
+        if (!userId) {
+            console.error('No userId in customer metadata');
+            return;
+        }
+        
+        // Check if user exists in database, if not create them
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+        
+        if (!existingUser) {
+            console.log('Creating new user record for payment failure:', userId);
+            await prisma.user.create({
+                data: {
+                    id: userId,
+                    email: 'email' in customer ? (customer as any).email : `user-${userId}@example.com`,
+                    stripeCustomerId: customerId,
+                    subscriptionStatus: 'past_due',
+                }
+            });
+        } else {
             await prisma.user.update({
-                where: { id: customer.metadata.userId },
+                where: { id: userId },
                 data: {
                     subscriptionStatus: 'past_due',
                 }
@@ -972,4 +1235,5 @@ async function handlePaymentFailure(invoice: any) {
     }
 }
 
+export { handleWebhookEvent };
 export default router;
