@@ -774,6 +774,98 @@ router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) =>
     }
 }));
 
+// Dashboard stats endpoint
+router.get('/dashboard/stats', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+    const userId = req.user?.sub;
+    if (!userId) {
+        return res.status(400).json({ error: 'User ID required' });
+    }
+    
+    try {
+        // Get resume count
+        const resumeCount = await prisma.resume.count({
+            where: { userId }
+        });
+        
+        // Get cover letter count
+        const coverLetterCount = await prisma.coverLetter.count({
+            where: { userId }
+        });
+        
+        // Get job tracking stats
+        const jobs = await prisma.job.findMany({
+            where: { userId },
+            select: { status: true }
+        });
+        
+        const totalJobs = jobs.length;
+        const appliedJobs = jobs.filter((job: any) => job.status === 'applied').length;
+        const interviewingJobs = jobs.filter((job: any) => job.status === 'interviewing').length;
+        const rejectedJobs = jobs.filter((job: any) => job.status === 'rejected').length;
+        const offerJobs = jobs.filter((job: any) => job.status === 'offer').length;
+        const withdrawnJobs = jobs.filter((job: any) => job.status === 'withdrawn').length;
+        const pendingJobs = jobs.filter((job: any) => job.status === 'pending').length;
+        const followUpJobs = jobs.filter((job: any) => job.status === 'follow-up').length;
+        
+        // Calculate response rate
+        const responseCounts = interviewingJobs + offerJobs + pendingJobs + followUpJobs;
+        const responseRate = totalJobs > 0 ? Math.round((responseCounts / totalJobs) * 100) : 0;
+        const interviewRate = totalJobs > 0 ? Math.round((interviewingJobs / totalJobs) * 100) : 0;
+        const offerRate = totalJobs > 0 ? Math.round((offerJobs / totalJobs) * 100) : 0;
+        
+        // Get user subscription status
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                planType: true,
+                subscriptionStatus: true,
+                subscriptionEnd: true
+            }
+        });
+        
+        const isPremium = Boolean(user?.planType === 'premium' && 
+                         user.subscriptionStatus === 'active' &&
+                         user.subscriptionEnd && 
+                         new Date(user.subscriptionEnd) > new Date());
+        
+        const dashboardStats = {
+            user: {
+                isPremium,
+                planType: user?.planType || 'free',
+                subscriptionStatus: user?.subscriptionStatus || 'none'
+            },
+            resumes: {
+                total: resumeCount
+            },
+            coverLetters: {
+                total: coverLetterCount
+            },
+            jobTracking: {
+                total: totalJobs,
+                byStatus: {
+                    applied: appliedJobs,
+                    interviewing: interviewingJobs,
+                    rejected: rejectedJobs,
+                    offer: offerJobs,
+                    withdrawn: withdrawnJobs,
+                    pending: pendingJobs,
+                    followUp: followUpJobs
+                },
+                metrics: {
+                    responseRate,
+                    interviewRate,
+                    offerRate
+                }
+            }
+        };
+        
+        res.json(dashboardStats);
+    } catch (error) {
+        console.error('Dashboard stats error:', error);
+        res.status(500).json({ error: 'Failed to fetch dashboard stats' });
+    }
+}));
+
 // POST /api/resumes/:id/pdf
 router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
     try {
