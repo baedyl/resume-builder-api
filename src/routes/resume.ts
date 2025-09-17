@@ -170,17 +170,29 @@ const upload = multer({
 router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
     try {
         const parsed = EnhanceSummarySchema.parse(req.body);
-        const { summary, language = 'en' } = parsed;
+        const { summary, language } = parsed;
         
-        const languageConfig = getLanguageConfig(language);
-        const languageInfo = getLanguageInfo(language);
+        // Always detect language from input text
+        let effectiveLanguage = 'en'; // default fallback
+        try {
+            const detected = await detectLanguage(summary);
+            if (detected?.code) {
+                effectiveLanguage = detected.code;
+                console.log(`Detected language for summary: ${detected.code} (${detected.name})`);
+            }
+        } catch (error) {
+            console.warn('Language detection failed for summary, using English:', error);
+        }
+        
+        const languageConfig = getLanguageConfig(effectiveLanguage);
+        const languageInfo = getLanguageInfo(effectiveLanguage);
 
         const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. ${languageInfo.instruction} Original summary: ${summary}`;
 
         // Create language-appropriate fallback content
-        const fallbackContent = language === 'es' 
+        const fallbackContent = effectiveLanguage === 'es' 
             ? "Un profesional dedicado y versátil con una sólida base en su campo. Historial comprobado de entregar resultados y adaptarse a nuevos desafíos. Comprometido con el aprendizaje continuo y el crecimiento profesional."
-            : language === 'fr'
+            : effectiveLanguage === 'fr'
             ? "Un professionnel dévoué et polyvalent avec une solide base dans son domaine. Antécédents prouvés de livrer des résultats et s'adapter aux nouveaux défis. Engagé dans l'apprentissage continu et la croissance professionnelle."
             : "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
 
@@ -190,7 +202,25 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
             fallbackContent
         );
 
-        return res.json({ data: enhancedSummary });
+        // Parse the JSON response and extract just the summary text
+        let finalSummary = enhancedSummary;
+        try {
+            const parsed = JSON.parse(enhancedSummary);
+            if (parsed.professional_summary) {
+                finalSummary = parsed.professional_summary;
+            } else if (parsed.enhanced_summary) {
+                finalSummary = parsed.enhanced_summary;
+            } else if (parsed.summary) {
+                finalSummary = parsed.summary;
+            } else if (typeof parsed === 'string') {
+                finalSummary = parsed;
+            }
+        } catch (error) {
+            // If it's not JSON, use the raw response
+            finalSummary = enhancedSummary;
+        }
+
+        return res.json({ summary: finalSummary });
     } catch (error) {
         handleValidationError(error, res);
     }
@@ -200,17 +230,29 @@ router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
 router.post('/enhance-description', asyncHandler(async (req: any, res) => {
     try {
         const parsed = EnhanceDescriptionSchema.parse(req.body);
-        const { jobTitle, description, language = 'en' } = parsed;
+        const { jobTitle, description, language } = parsed;
         
-        const languageConfig = getLanguageConfig(language);
-        const languageInfo = getLanguageInfo(language);
+        // Always detect language from input text
+        let effectiveLanguage = 'en'; // default fallback
+        try {
+            const detected = await detectLanguage(description);
+            if (detected?.code) {
+                effectiveLanguage = detected.code;
+                console.log(`Detected language for description: ${detected.code} (${detected.name})`);
+            }
+        } catch (error) {
+            console.warn('Language detection failed for description, using English:', error);
+        }
+        
+        const languageConfig = getLanguageConfig(effectiveLanguage);
+        const languageInfo = getLanguageInfo(effectiveLanguage);
 
         const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. Format with single line breaks between bullet points, no extra spacing. ${languageInfo.instruction} Original: ${description}`;
 
         // Create language-appropriate fallback content
-        const fallbackContent = language === 'es' 
+        const fallbackContent = effectiveLanguage === 'es' 
             ? `• Ejecutó responsabilidades principales como ${jobTitle}, mejorando la productividad del equipo y los resultados del proyecto.\n• Colaboró con partes interesadas para lograr objetivos organizacionales, aprovechando habilidades de experiencia previa.\n• Contribuyó a iniciativas clave, adaptándose a entornos de trabajo dinámicos`
-            : language === 'fr'
+            : effectiveLanguage === 'fr'
             ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques`
             : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments`;
 
