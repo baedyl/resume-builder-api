@@ -9,6 +9,7 @@ import skillRouter from './routes/skill';
 import coverLetterRouter from './routes/coverLetter';
 import jobRouter from './routes/job';
 import stripeRouter from './routes/stripe';
+import linkedinRouter from './routes/linkedin';
 import { ensureAuthenticated } from './middleware/auth'; // Adjust path as needed
 
 const app = express();
@@ -51,5 +52,6 @@ app.use('/api/skills', skillRouter);
 app.use('/api/cover-letter', coverLetterRouter);
 app.use('/api/jobs', jobRouter);
 app.use('/api/stripe', stripeRouter);
+app.use('/api/linkedin', linkedinRouter);
 
 app.listen(3000, () => console.log('Server running on port 3000'));
