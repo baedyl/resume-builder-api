@@ -125,6 +125,25 @@ function generateModernTemplate(data, doc, language = 'en') {
     
     doc.moveDown(0.5);
 
+    if (exp.companyDescription) {
+      doc.font('Helvetica-Oblique')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(exp.companyDescription, {
+           align: 'justify',
+           lineGap: 2
+         });
+      doc.moveDown(0.3);
+    }
+
+    if (exp.techStack) {
+      doc.font('Helvetica')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`Tech: ${exp.techStack}`);
+      doc.moveDown(0.3);
+    }
+
     if (exp.description) {
       doc.font('Helvetica')
          .fontSize(11)

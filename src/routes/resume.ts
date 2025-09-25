@@ -287,7 +287,17 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         // Ensure skills are properly formatted for PDF template
         const pdfData = {
             ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || []
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            workExperience: validatedData.workExperience.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
+            }))
         };
 
         // Generate PDF using template without saving to database
@@ -331,6 +341,8 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: (exp as any).companyDescription,
+                techStack: (exp as any).techStack,
             })),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
@@ -396,7 +408,17 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         // Ensure skills are properly formatted for PDF template
         const pdfData = {
             ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || []
+            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            workExperience: validatedData.workExperience.map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
+            }))
         };
 
         // Generate PDF using template
@@ -455,6 +477,8 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
@@ -730,6 +754,8 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     startDate: new Date(exp.startDate),
                     endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
                     description: exp.description,
+                    companyDescription: exp.companyDescription,
+                    techStack: exp.techStack,
                 })),
             };
         }
@@ -950,6 +976,8 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
@@ -1036,6 +1064,8 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
@@ -1162,6 +1192,8 @@ ${uniqueSkills.map(skill => skill.name).join(', ')}
                         startDate: new Date(exp.startDate),
                         endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
                         description: exp.description,
+                        companyDescription: exp.companyDescription,
+                        techStack: exp.techStack,
                     })),
                 },
                 educations: {
@@ -1235,6 +1267,8 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
@@ -1306,6 +1340,8 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: (exp as any).companyDescription,
+                techStack: (exp as any).techStack,
             })),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
@@ -1416,6 +1452,8 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
+                companyDescription: exp.companyDescription,
+                techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,

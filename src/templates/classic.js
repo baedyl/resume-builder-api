@@ -150,6 +150,20 @@ function generateClassicTemplate(data, doc, language = 'en') {
          .text(exp.location);
     }
     
+    if (exp.companyDescription) {
+      doc.font('Times-Italic')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(exp.companyDescription);
+    }
+    
+    if (exp.techStack) {
+      doc.font('Times-Roman')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`Tech: ${exp.techStack}`);
+    }
+
     doc.moveDown(0.5);
     
     if (exp.description) {

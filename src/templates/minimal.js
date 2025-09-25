@@ -131,6 +131,20 @@ function generateMinimalTemplate(data, doc, language = 'en') {
     
     doc.moveDown(0.5);
     
+    if (exp.companyDescription) {
+      doc.font('Helvetica-Oblique')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(exp.companyDescription);
+    }
+
+    if (exp.techStack) {
+      doc.font('Helvetica')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`Tech: ${exp.techStack}`);
+    }
+
     if (exp.description) {
       doc.font('Helvetica')
          .fontSize(11)

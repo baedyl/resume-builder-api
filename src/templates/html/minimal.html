@@ -73,6 +73,8 @@
           </div>
           <div class="dates">{{startDate}} – {{endDate}}</div>
         </div>
+        {{#companyDescription}}<div class="task">{{companyDescription}}</div>{{/companyDescription}}
+        {{#techStack}}<div class="task">Tech: {{techStack}}</div>{{/techStack}}
         {{#tasks}}<div class="task">{{.}}</div>{{/tasks}}
       </div>
       {{/workExperience}}

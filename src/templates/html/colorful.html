@@ -235,6 +235,8 @@
             <div class="company-name">
               {{company}} | <span class="dates">{{startDate}} - {{endDate}}</span>
             </div>
+            {{#companyDescription}}<div class="description">{{companyDescription}}</div>{{/companyDescription}}
+            {{#techStack}}<div class="description">{{techStack}}</div>{{/techStack}}
             {{#tasks}}
             <div class="description">• {{.}}</div>
             {{/tasks}}

@@ -14,9 +14,12 @@ export interface ResumeData {
   workExperience: Array<{
     jobTitle: string;
     company: string;
+    location?: string;
     startDate: string;
     endDate?: string;
     description?: string;
+    companyDescription?: string;
+    techStack?: string;
   }>;
   education: Array<{
     degree: string;

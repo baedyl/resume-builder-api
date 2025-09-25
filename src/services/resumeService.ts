@@ -20,6 +20,8 @@ export interface ResumeData {
         endDate?: string;
         isCurrent?: boolean;
         description?: string;
+        companyDescription?: string;
+        techStack?: string;
     }>;
     education: Array<{
         degree: string;
@@ -83,6 +85,8 @@ export async function createResume(data: ResumeData) {
             startDate: new Date(exp.startDate),
             endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
             description: exp.description,
+            companyDescription: exp.companyDescription,
+            techStack: exp.techStack,
         };
     });
 

@@ -69,6 +69,8 @@
       <div class="entry">
         <div class="job-title">{{jobTitle}}</div>
         <div class="company">{{company}} <span class="dates">| {{startDate}} - {{endDate}}</span></div>
+        {{#companyDescription}}<div class="task">{{companyDescription}}</div>{{/companyDescription}}
+        {{#techStack}}<div class="task">Tech: {{techStack}}</div>{{/techStack}}
         {{#tasks}}<div class="task">{{.}}</div>{{/tasks}}
       </div>
       {{/workExperience}}

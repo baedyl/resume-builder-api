@@ -9,6 +9,8 @@ export const WorkExperienceSchema = z.object({
     endDate: z.string().optional(),
     isCurrent: z.boolean().optional(),
     description: z.string().optional(),
+    companyDescription: z.string().optional(),
+    techStack: z.string().optional(),
 });
 
 export const EducationSchema = z.object({
