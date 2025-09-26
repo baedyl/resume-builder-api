@@ -49,6 +49,7 @@ model Education {
   degree         String
   major          String?
   institution    String
+  startYear      Int?
   graduationYear Int?
   gpa            Float?
   description    String?

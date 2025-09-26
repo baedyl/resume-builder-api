@@ -133,8 +133,18 @@ function generateClassicTemplate(data, doc, language = 'en') {
        .fillColor(textColor)
        .text(exp.jobTitle);
     
-    const companyAndDate = [
+    const companyLine = [
       exp.company,
+      exp.companyDescription
+    ].filter(Boolean).join(' | ');
+
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(companyLine);
+
+    const companyAndDate = [
+      exp.location,
       `${exp.startDate} - ${exp.endDate || 'Present'}`
     ].filter(Boolean).join(' | ');
     
@@ -150,30 +160,27 @@ function generateClassicTemplate(data, doc, language = 'en') {
          .text(exp.location);
     }
     
-    if (exp.companyDescription) {
-      doc.font('Times-Italic')
-         .fontSize(10)
-         .fillColor(textColor)
-         .text(exp.companyDescription);
-    }
-    
-    if (exp.techStack) {
-      doc.font('Times-Roman')
-         .fontSize(10)
-         .fillColor(textColor)
-         .text(`Tech: ${exp.techStack}`);
-    }
-
     doc.moveDown(0.5);
     
     if (exp.description) {
       doc.font('Times-Roman')
          .fontSize(11)
          .fillColor(textColor)
-         .text(exp.description, {
+          .text((() => {
+            return exp.description;
+          })(), {
            align: 'justify',
            lineGap: 2
          });
+    }
+
+    if (exp.techStack) {
+      const { getLanguageConfig } = require('../utils/language');
+      const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
+      doc.font('Times-Roman')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`${techLabel}: ${exp.techStack}`);
     }
   });
 

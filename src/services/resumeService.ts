@@ -27,6 +27,7 @@ export interface ResumeData {
         degree: string;
         major?: string;
         institution: string;
+        startYear?: number;
         graduationYear?: number;
         gpa?: number;
         description?: string;
@@ -113,6 +114,7 @@ export async function createResume(data: ResumeData) {
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
+                        startYear: edu.startYear,
                         graduationYear: edu.graduationYear,
                         gpa: edu.gpa,
                         description: edu.description,

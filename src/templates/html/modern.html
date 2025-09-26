@@ -54,10 +54,9 @@
           {{#workExperience}}
           <div class="entry">
             <div class="job">{{jobTitle}}</div>
-            <div class="company">{{company}} <span class="dates">| {{startDate}} - {{endDate}}</span></div>
-            {{#companyDescription}}<div class="bullet" style="margin-top:2px">{{companyDescription}}</div>{{/companyDescription}}
-            {{#techStack}}<div class="bullet" style="margin-top:2px">Tech: {{techStack}}</div>{{/techStack}}
+            <div class="company">{{company}}{{#companyDescription}} | {{companyDescription}}{{/companyDescription}} <span class="dates">| {{startDate}} - {{endDate}}</span></div>
             {{#tasks}}<div class="bullet">{{.}}</div>{{/tasks}}
+            {{#techStack}}<div style="font-size:11px; color:#0f172a; margin-top:4px">{{labels.tech}}: {{techStack}}</div>{{/techStack}}
           </div>
           {{/workExperience}}
         </div>
@@ -68,7 +67,7 @@
           <div class="entry">
             <div class="job">{{degree}}</div>
             <div class="company">{{institution}}</div>
-            <div class="dates">{{graduationYear}}</div>
+            <div class="dates">{{#startYear}}{{startYear}}{{#graduationYear}} - {{/graduationYear}}{{/startYear}}{{#graduationYear}}{{graduationYear}}{{/graduationYear}}</div>
           </div>
           {{/education}}
         </div>

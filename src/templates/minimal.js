@@ -114,10 +114,15 @@ function generateMinimalTemplate(data, doc, language = 'en') {
        .fillColor(textColor)
        .text(exp.jobTitle);
     
+    const companyLine = [
+      exp.company,
+      exp.companyDescription
+    ].filter(Boolean).join(' | ');
+
     doc.font('Helvetica')
        .fontSize(11)
-       .fillColor(textColor)
-       .text(exp.company);
+        .fillColor(textColor)
+        .text(companyLine);
     
     const dateAndLocation = [
       `${exp.startDate} - ${exp.endDate || 'Present'}`,
@@ -131,28 +136,32 @@ function generateMinimalTemplate(data, doc, language = 'en') {
     
     doc.moveDown(0.5);
     
-    if (exp.companyDescription) {
-      doc.font('Helvetica-Oblique')
-         .fontSize(10)
-         .fillColor(textColor)
-         .text(exp.companyDescription);
-    }
-
-    if (exp.techStack) {
-      doc.font('Helvetica')
-         .fontSize(10)
-         .fillColor(textColor)
-         .text(`Tech: ${exp.techStack}`);
-    }
-
     if (exp.description) {
       doc.font('Helvetica')
          .fontSize(11)
          .fillColor(textColor)
-         .text(exp.description, {
+          .text((() => {
+            const cd = (exp.companyDescription || '').toString().trim();
+            if (!cd) return exp.description;
+            try {
+              const re = new RegExp(cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+              return exp.description.replace(re, '').trim();
+            } catch (_) {
+              return exp.description;
+            }
+          })(), {
            align: 'justify',
            lineGap: 2
          });
+    }
+
+    if (exp.techStack) {
+      const { getLanguageConfig } = require('../utils/language');
+      const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
+      doc.font('Helvetica')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`${techLabel}: ${exp.techStack}`);
     }
   });
 

@@ -17,6 +17,9 @@ export const LANGUAGE_CONFIG = {
             certifications: 'CERTIFICATIONS',
             languages: 'LANGUAGES'
         },
+        labels: {
+            tech: 'Tech'
+        },
         systemMessage: 'You are an expert resume writer. Return only valid JSON.',
         instruction: ''
     },
@@ -28,6 +31,9 @@ export const LANGUAGE_CONFIG = {
             education: 'FORMATION',
             certifications: 'CERTIFICATIONS',
             languages: 'LANGUES'
+        },
+        labels: {
+            tech: 'Technologie'
         },
         systemMessage: 'Vous êtes un expert en rédaction de CV. Retournez uniquement du JSON valide.',
         instruction: 'IMPORTANT: The provided text is in French. You must return all content in French. Keep technical terms and proper nouns as appropriate.'
@@ -41,6 +47,9 @@ export const LANGUAGE_CONFIG = {
             certifications: 'CERTIFICACIONES',
             languages: 'IDIOMAS'
         },
+        labels: {
+            tech: 'Tecnología'
+        },
         systemMessage: 'Eres un experto en redacción de currículums. Devuelve solo JSON válido.',
         instruction: 'IMPORTANT: The provided text is in Spanish. You must return all content in Spanish. Keep technical terms and proper nouns as appropriate.'
     },
@@ -52,6 +61,9 @@ export const LANGUAGE_CONFIG = {
             education: 'AUSBILDUNG',
             certifications: 'ZERTIFIZIERUNGEN',
             languages: 'SPRACHEN'
+        },
+        labels: {
+            tech: 'Technologie'
         },
         systemMessage: 'Sie sind ein Experte für Lebenslauf-Erstellung. Geben Sie nur gültiges JSON zurück.',
         instruction: 'IMPORTANT: The provided text is in German. You must return all content in German. Keep technical terms and proper nouns as appropriate.'

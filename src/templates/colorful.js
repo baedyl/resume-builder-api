@@ -235,35 +235,43 @@ function generateColorfulTemplate(data, doc, language = 'en') {
       doc.font('Helvetica-Bold').fontSize(12).fillColor(textColor).text(exp.jobTitle || '', leftColumnX, currentY);
       currentY += 12;
 
-      doc.font('Helvetica').fontSize(10).fillColor(primaryColor).text(exp.company || '', leftColumnX, currentY);
+      const companyLine = [exp.company || '', exp.companyDescription || ''].filter(Boolean).join(' | ');
+      doc.font('Helvetica').fontSize(10).fillColor(primaryColor).text(companyLine, leftColumnX, currentY);
       currentY += 12;
 
       const dateRange = `${exp.startDate ? new Date(exp.startDate).getFullYear() : ''} - ${exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate).getFullYear() : 'Present'}`;
       doc.font('Helvetica').fontSize(9).fillColor(textColor).text(dateRange, leftColumnX, currentY);
       currentY += 10;
 
-      if (exp.companyDescription) {
-        const h = doc.heightOfString(exp.companyDescription, { width: columnWidth - 20, align: 'left' });
-        doc.font('Helvetica-Oblique').fontSize(9).fillColor(textColor).text(exp.companyDescription, leftColumnX, currentY, {
-          width: columnWidth - 20,
-          align: 'left'
-        });
-        currentY += h + 4;
+      // companyDescription is now shown next to company
+
+      const cleanDescription = (() => {
+        const cd = (exp.companyDescription || '').toString().trim();
+        if (!cd) return exp.description || '';
+        try {
+          const re = new RegExp(cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+          return (exp.description || '').replace(re, '').trim();
+        } catch (_) {
+          return exp.description || '';
+        }
+      })();
+
+      const tasks = splitDescriptionToTasks(cleanDescription);
+      if (tasks.length > 0) {
+        currentY = drawBulletList(tasks, leftColumnX, currentY + 2, columnWidth - 20);
       }
 
       if (exp.techStack) {
-        const techText = `Tech: ${exp.techStack}`;
+        const { getLanguageConfig } = require('../utils/language');
+        const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
+        const techText = `${techLabel}: ${exp.techStack}`;
         const h2 = doc.heightOfString(techText, { width: columnWidth - 20, align: 'left' });
+        currentY += 4;
         doc.font('Helvetica').fontSize(9).fillColor(textColor).text(techText, leftColumnX, currentY, {
           width: columnWidth - 20,
           align: 'left'
         });
         currentY += h2 + 4;
-      }
-
-      const tasks = splitDescriptionToTasks(exp.description || '');
-      if (tasks.length > 0) {
-        currentY = drawBulletList(tasks, leftColumnX, currentY + 2, columnWidth - 20);
       }
 
       currentY += spacingBetweenEntries;

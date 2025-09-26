@@ -294,7 +294,20 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
+                description: (() => {
+                    const cd = (exp.companyDescription || '').toString().trim();
+                    if (!cd) return exp.description;
+                    try {
+                        const re = new RegExp(cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+                        return (exp.description || '')
+                            .replace(re, '')
+                            .replace(/\s{2,}/g, ' ')
+                            .replace(/^\s*[•\-|:]+\s*/, '')
+                            .trim();
+                    } catch (_) {
+                        return exp.description;
+                    }
+                })(),
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
             }))
@@ -340,13 +353,16 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
+                description: (() => {
+                    return exp.description;
+                })(),
                 companyDescription: (exp as any).companyDescription,
                 techStack: (exp as any).techStack,
             })),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
@@ -415,7 +431,9 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
+                description: (() => {
+                    return exp.description;
+                })(),
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
             }))
@@ -476,13 +494,16 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
+                description: (() => {
+                    return exp.description;
+                })(),
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
@@ -768,6 +789,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                     degree: edu.degree,
                     major: edu.major,
                     institution: edu.institution,
+                    startYear: edu.startYear,
                     graduationYear: edu.graduationYear,
                     gpa: edu.gpa,
                     description: edu.description,
@@ -975,13 +997,16 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
+                description: (() => {
+                    return exp.description;
+                })(),
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
             })) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
@@ -1201,6 +1226,7 @@ ${uniqueSkills.map(skill => skill.name).join(', ')}
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
+                        startYear: edu.startYear,
                         graduationYear: edu.graduationYear,
                         gpa: edu.gpa,
                         description: edu.description,
@@ -1273,6 +1299,7 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
@@ -1346,6 +1373,7 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
@@ -1458,6 +1486,7 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
+                startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
