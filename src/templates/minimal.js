@@ -114,10 +114,15 @@ function generateMinimalTemplate(data, doc, language = 'en') {
        .fillColor(textColor)
        .text(exp.jobTitle);
     
+    const companyLine = [
+      exp.company,
+      exp.companyDescription
+    ].filter(Boolean).join(' | ');
+
     doc.font('Helvetica')
        .fontSize(11)
-       .fillColor(textColor)
-       .text(exp.company);
+        .fillColor(textColor)
+        .text(companyLine);
     
     const dateAndLocation = [
       `${exp.startDate} - ${exp.endDate || 'Present'}`,
@@ -135,10 +140,28 @@ function generateMinimalTemplate(data, doc, language = 'en') {
       doc.font('Helvetica')
          .fontSize(11)
          .fillColor(textColor)
-         .text(exp.description, {
+          .text((() => {
+            const cd = (exp.companyDescription || '').toString().trim();
+            if (!cd) return exp.description;
+            try {
+              const re = new RegExp(cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
+              return exp.description.replace(re, '').trim();
+            } catch (_) {
+              return exp.description;
+            }
+          })(), {
            align: 'justify',
            lineGap: 2
          });
+    }
+
+    if (exp.techStack) {
+      const { getLanguageConfig } = require('../utils/language');
+      const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
+      doc.font('Helvetica')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`${techLabel}: ${exp.techStack}`);
     }
   });
 
@@ -213,9 +236,19 @@ function generateMinimalTemplate(data, doc, language = 'en') {
          .fillColor(textColor)
          .text(cert.name);
       
+      const issueYear = (() => {
+        if (!cert.issueDate) return null;
+        try {
+          const d = new Date(cert.issueDate);
+          return isNaN(d.getTime()) ? String(cert.issueDate) : d.getUTCFullYear().toString();
+        } catch (_) {
+          return String(cert.issueDate);
+        }
+      })();
+
       const certDetails = [
         cert.issuer,
-        cert.issueDate
+        issueYear
       ].filter(Boolean).join(' | ');
       
       doc.font('Helvetica')

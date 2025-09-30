@@ -233,11 +233,12 @@
           <div class="experience-entry">
             <div class="job-title">{{jobTitle}}</div>
             <div class="company-name">
-              {{company}} | <span class="dates">{{startDate}} - {{endDate}}</span>
+              {{company}}{{#companyDescription}} | {{companyDescription}}{{/companyDescription}} | <span class="dates">{{startDate}} - {{endDate}}</span>
             </div>
             {{#tasks}}
             <div class="description">• {{.}}</div>
             {{/tasks}}
+            {{#techStack}}<div class="description">{{labels.tech}}: {{techStack}}</div>{{/techStack}}
           </div>
           {{/workExperience}}
         </div>
@@ -249,7 +250,7 @@
           <div class="education-entry">
             <div class="degree">{{degree}}</div>
             <div class="institution">{{institution}}</div>
-            <div class="graduation-year">{{graduationYear}}</div>
+            <div class="graduation-year">{{#startYear}}{{startYear}}{{#graduationYear}} - {{/graduationYear}}{{/startYear}}{{#graduationYear}}{{graduationYear}}{{/graduationYear}}</div>
           </div>
           {{/.}}
         </div>

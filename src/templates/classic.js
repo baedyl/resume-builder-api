@@ -133,8 +133,18 @@ function generateClassicTemplate(data, doc, language = 'en') {
        .fillColor(textColor)
        .text(exp.jobTitle);
     
-    const companyAndDate = [
+    const companyLine = [
       exp.company,
+      exp.companyDescription
+    ].filter(Boolean).join(' | ');
+
+    doc.font('Times-Roman')
+       .fontSize(11)
+       .fillColor(textColor)
+       .text(companyLine);
+
+    const companyAndDate = [
+      exp.location,
       `${exp.startDate} - ${exp.endDate || 'Present'}`
     ].filter(Boolean).join(' | ');
     
@@ -156,10 +166,21 @@ function generateClassicTemplate(data, doc, language = 'en') {
       doc.font('Times-Roman')
          .fontSize(11)
          .fillColor(textColor)
-         .text(exp.description, {
+          .text((() => {
+            return exp.description;
+          })(), {
            align: 'justify',
            lineGap: 2
          });
+    }
+
+    if (exp.techStack) {
+      const { getLanguageConfig } = require('../utils/language');
+      const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
+      doc.font('Times-Roman')
+         .fontSize(10)
+         .fillColor(textColor)
+         .text(`${techLabel}: ${exp.techStack}`);
     }
   });
 
@@ -233,11 +254,21 @@ function generateClassicTemplate(data, doc, language = 'en') {
          .fillColor(textColor)
          .text(cert.name);
       
+      const issueYear = (() => {
+        if (!cert.issueDate) return null;
+        try {
+          const d = new Date(cert.issueDate);
+          return isNaN(d.getTime()) ? String(cert.issueDate) : d.getUTCFullYear().toString();
+        } catch (_) {
+          return String(cert.issueDate);
+        }
+      })();
+
       const certDetails = [
         cert.issuer,
-        cert.issueDate
+        issueYear
       ].filter(Boolean).join(' | ');
-      
+
       doc.font('Times-Roman')
          .fontSize(11)
          .fillColor(textColor)

@@ -14,13 +14,17 @@ export interface ResumeData {
   workExperience: Array<{
     jobTitle: string;
     company: string;
+    location?: string;
     startDate: string;
     endDate?: string;
     description?: string;
+    companyDescription?: string;
+    techStack?: string;
   }>;
   education: Array<{
     degree: string;
     institution: string;
+    startYear?: number;
     graduationYear?: number;
     description?: string;
   }>;
@@ -74,7 +78,8 @@ function formatDate(date: string | Date): string {
     return 'Present'; // Fallback for invalid dates
   }
   
-  return d.getFullYear().toString();
+  // Use UTC to avoid timezone shifting dates into previous year
+  return d.getUTCFullYear().toString();
 }
 
 export function generateHTMLResume(data: ResumeData, templateName: string = 'colorful', language: string = 'en'): string {
@@ -85,6 +90,7 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
   const processedData = {
     ...data,
     titles: languageConfig.sections,
+    labels: languageConfig.labels || { tech: 'Tech' },
     showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0,
     headline: (data as any).title || (data as any).profession || (data as any).role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
     languagesLine: (data.languages || [])
@@ -98,15 +104,31 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
       startDate: formatDate(exp.startDate),
       endDate: exp.endDate && exp.endDate !== 'Present' ? formatDate(exp.endDate) : 'Present',
       tasks: (() => {
-        const raw = String(exp.description || '');
+        const companyDesc = String(exp.companyDescription || '').trim();
+        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const base = String(exp.description || '');
+        const raw = companyDesc
+          ? base.replace(new RegExp(escapeRegex(companyDesc), 'ig'), '').trim()
+          : base;
         const parts = raw.includes('•') ? raw.split('•') : raw.split('.');
-        return parts
+        const cleaned = parts
           .map(part => part.replace(/^\s*[•\-]\s*/g, '').trim())
           .filter(Boolean);
+        // Remove duplicates and any task that equals the company description
+        const seen = new Set<string>();
+        const companyDescNorm = companyDesc.toLowerCase();
+        return cleaned.filter(item => {
+          const normalized = item.replace(/[\.;\s]+$/g, '').toLowerCase();
+          if (companyDescNorm && normalized === companyDescNorm) return false;
+          if (seen.has(normalized)) return false;
+          seen.add(normalized);
+          return true;
+        });
       })()
     })),
     education: data.education.map(edu => ({
       ...edu,
+      startYear: edu.startYear,
       graduationYear: edu.graduationYear?.toString()
     })),
     languages: data.languages.map(processLanguageProficiency),

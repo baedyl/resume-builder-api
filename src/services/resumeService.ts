@@ -20,11 +20,14 @@ export interface ResumeData {
         endDate?: string;
         isCurrent?: boolean;
         description?: string;
+        companyDescription?: string;
+        techStack?: string;
     }>;
     education: Array<{
         degree: string;
         major?: string;
         institution: string;
+        startYear?: number;
         graduationYear?: number;
         gpa?: number;
         description?: string;
@@ -83,6 +86,8 @@ export async function createResume(data: ResumeData) {
             startDate: new Date(exp.startDate),
             endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
             description: exp.description,
+            companyDescription: exp.companyDescription,
+            techStack: exp.techStack,
         };
     });
 
@@ -109,6 +114,7 @@ export async function createResume(data: ResumeData) {
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
+                        startYear: edu.startYear,
                         graduationYear: edu.graduationYear,
                         gpa: edu.gpa,
                         description: edu.description,
