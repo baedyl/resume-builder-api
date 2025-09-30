@@ -278,10 +278,18 @@ function generateModernTemplate(data, doc, language = 'en') {
          .text(cert.issuer);
       
       if (cert.issueDate) {
+        const issueYear = (() => {
+          try {
+            const d = new Date(cert.issueDate);
+            return isNaN(d.getTime()) ? String(cert.issueDate) : d.getUTCFullYear().toString();
+          } catch (_) {
+            return String(cert.issueDate);
+          }
+        })();
         doc.font('Helvetica')
            .fontSize(11)
            .fillColor(textColor)
-           .text(`Issued: ${cert.issueDate}`);
+           .text(`Issued: ${issueYear}`);
       }
     });
   }

@@ -78,7 +78,8 @@ function formatDate(date: string | Date): string {
     return 'Present'; // Fallback for invalid dates
   }
   
-  return d.getFullYear().toString();
+  // Use UTC to avoid timezone shifting dates into previous year
+  return d.getUTCFullYear().toString();
 }
 
 export function generateHTMLResume(data: ResumeData, templateName: string = 'colorful', language: string = 'en'): string {

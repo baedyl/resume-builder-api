@@ -239,7 +239,7 @@ function generateColorfulTemplate(data, doc, language = 'en') {
       doc.font('Helvetica').fontSize(10).fillColor(primaryColor).text(companyLine, leftColumnX, currentY);
       currentY += 12;
 
-      const dateRange = `${exp.startDate ? new Date(exp.startDate).getFullYear() : ''} - ${exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate).getFullYear() : 'Present'}`;
+      const dateRange = `${exp.startDate ? new Date(exp.startDate).getUTCFullYear() : ''} - ${exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate).getUTCFullYear() : 'Present'}`;
       doc.font('Helvetica').fontSize(9).fillColor(textColor).text(dateRange, leftColumnX, currentY);
       currentY += 10;
 

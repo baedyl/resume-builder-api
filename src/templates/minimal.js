@@ -236,9 +236,19 @@ function generateMinimalTemplate(data, doc, language = 'en') {
          .fillColor(textColor)
          .text(cert.name);
       
+      const issueYear = (() => {
+        if (!cert.issueDate) return null;
+        try {
+          const d = new Date(cert.issueDate);
+          return isNaN(d.getTime()) ? String(cert.issueDate) : d.getUTCFullYear().toString();
+        } catch (_) {
+          return String(cert.issueDate);
+        }
+      })();
+
       const certDetails = [
         cert.issuer,
-        cert.issueDate
+        issueYear
       ].filter(Boolean).join(' | ');
       
       doc.font('Helvetica')
