@@ -17,7 +17,14 @@ export const EducationSchema = z.object({
     degree: z.string().min(1, 'Degree is required'),
     major: z.string().optional(),
     institution: z.string().min(1, 'Institution is required'),
-    startYear: z.number().int().min(1900, 'Start year must be a valid year').max(9999, 'Start year must be a valid year').optional(),
+    startYear: z.preprocess((val) => {
+        if (val === '' || val === null || typeof val === 'undefined') return undefined;
+        if (typeof val === 'string') {
+            const n = parseInt(val, 10);
+            return Number.isNaN(n) ? val : n;
+        }
+        return val;
+    }, z.number().int().min(1900, 'Start year must be a valid year').max(9999, 'Start year must be a valid year')).optional(),
     graduationYear: z.number().int().min(1900, 'Graduation year must be a valid year').max(9999, 'Graduation year must be a valid year').optional(),
     gpa: z.number().optional(),
     description: z.string().optional(),

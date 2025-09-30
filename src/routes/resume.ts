@@ -121,6 +121,18 @@ const ResumeSchema = z.object({
     language: z.string().optional().default('en'), // Add language parameter
 });
 
+// Looser education schema for updates to allow optional/empty startYear values
+const EducationSchemaUpdate = EducationSchema.extend({
+    startYear: z.preprocess((val) => {
+        if (val === '' || val === null || typeof val === 'undefined') return undefined;
+        if (typeof val === 'string') {
+            const n = parseInt(val, 10);
+            return Number.isNaN(n) ? val : n;
+        }
+        return val;
+    }, z.number().int().min(1900).max(9999)).optional(),
+});
+
 const ResumeUpdateSchema = z.object({
     fullName: z.string().min(1, 'Full name is required').optional(),
     email: z.string().email('Invalid email').optional(),
@@ -131,7 +143,7 @@ const ResumeUpdateSchema = z.object({
     summary: z.string().optional(),
     skills: z.array(SkillSchema).default([]),
     workExperience: z.array(WorkExperienceSchema).optional(),
-    education: z.array(EducationSchema).optional(),
+    education: z.array(EducationSchemaUpdate).optional(),
     languages: z.array(LanguageSchema).default([]),
     certifications: z.array(CertificationSchema).default([]),
     language: z.string().optional(), // Add language parameter
@@ -414,6 +426,10 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
 
         const resume = await createResume({
             ...validatedData,
+            education: (validatedData.education || []).map((edu: any) => ({
+                ...edu,
+                startYear: edu?.startYear ?? undefined,
+            })),
             userId
         } as ResumeData);
 
@@ -543,6 +559,10 @@ router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 
         const resume = await createResume({
             ...validatedData,
+            education: (validatedData.education || []).map((edu: any) => ({
+                ...edu,
+                startYear: edu?.startYear ?? undefined,
+            })),
             userId
         } as ResumeData);
 
@@ -785,13 +805,11 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         if (validatedData.education && validatedData.education.length > 0) {
             updateData.educations = {
                 deleteMany: {}, // Clear existing educations
-                create: validatedData.education.map((edu) => ({
+                create: validatedData.education.map(edu => ({
                     degree: edu.degree,
-                    major: edu.major,
                     institution: edu.institution,
-                    startYear: edu.startYear,
+                    startYear: edu.startYear ?? undefined,
                     graduationYear: edu.graduationYear,
-                    gpa: edu.gpa,
                     description: edu.description,
                 })),
             };
@@ -1349,6 +1367,10 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         // Save the resume to database first
         const resume = await createResume({
             ...validatedData,
+            education: (validatedData.education || []).map((edu: any) => ({
+                ...edu,
+                startYear: edu?.startYear ?? undefined,
+            })),
             userId
         } as ResumeData);
 
