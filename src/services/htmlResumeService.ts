@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import Mustache from 'mustache';
-import { getLanguageConfig } from '../utils/language';
+import { getLanguageConfig, localizeLanguageName, localizeProficiency } from '../utils/language';
 
 export interface ResumeData {
   fullName: string;
@@ -131,7 +131,16 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
       startYear: edu.startYear,
       graduationYear: edu.graduationYear?.toString()
     })),
-    languages: data.languages.map(processLanguageProficiency),
+    languages: data.languages.map(l => {
+      const name = localizeLanguageName(l.name, language);
+      const proficiency = localizeProficiency(l.proficiency, language);
+      const processed = processLanguageProficiency({ name, proficiency });
+      return {
+        name,
+        proficiency,
+        proficiencyLevels: processed.proficiencyLevels
+      };
+    }),
     certifications: (data.certifications || []).map(cert => ({
       ...cert,
       issueDate: cert.issueDate ? formatDate(cert.issueDate) : undefined

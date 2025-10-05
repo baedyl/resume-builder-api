@@ -81,8 +81,11 @@ function generateMinimalTemplate(data, doc, language = 'en') {
        .fontSize(11)
        .fillColor(textColor);
     
+    const { localizeLanguageName, localizeProficiency } = require('../utils/language');
     data.languages.forEach(lang => {
-      doc.text(`${lang.name} - ${lang.proficiency}`, {
+      const localizedName = localizeLanguageName(lang.name, language);
+      const localizedProf = localizeProficiency(lang.proficiency, language);
+      doc.text(`${localizedName} - ${localizedProf}`, {
         lineGap: 2
       });
     });

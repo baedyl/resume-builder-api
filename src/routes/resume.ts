@@ -300,7 +300,7 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         const pdfData = {
             ...validatedData,
             skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: validatedData.workExperience.map((exp: any) => ({
+            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -320,9 +320,9 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                         return exp.description;
                     }
                 })(),
-                companyDescription: exp.companyDescription,
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
-            }))
+            })))
         };
 
         // Generate PDF using template without saving to database
@@ -360,7 +360,7 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             linkedIn: validatedData.linkedIn || undefined,
             website: validatedData.website || undefined,
             summary: validatedData.summary || '',
-            workExperience: validatedData.workExperience.map(exp => ({
+            workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -368,9 +368,9 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: (exp as any).companyDescription,
+                companyDescription: (exp as any).companyDescription ? await translateText((exp as any).companyDescription, language) : (exp as any).companyDescription,
                 techStack: (exp as any).techStack,
-            })),
+            }))),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
                 institution: edu.institution,
@@ -441,7 +441,7 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const pdfData = {
             ...validatedData,
             skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: validatedData.workExperience.map((exp: any) => ({
+            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -450,9 +450,9 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription,
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
-            }))
+            })))
         };
 
         // Generate PDF using template
@@ -505,7 +505,7 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: resume.workExperiences?.map((exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -513,9 +513,9 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription,
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
                 techStack: exp.techStack,
-            })) || [],
+            }))),
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
@@ -1010,7 +1010,7 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: resume.workExperiences?.map((exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -1018,9 +1018,9 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription,
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, reqLanguage as string) : exp.companyDescription,
                 techStack: exp.techStack,
-            })) || [],
+            }))) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
@@ -1305,15 +1305,15 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: resume.workExperiences?.map((exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: exp.companyDescription,
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
                 techStack: exp.techStack,
-            })) || [],
+            }))) || [],
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
@@ -1383,15 +1383,15 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             linkedIn: validatedData.linkedIn || undefined,
             website: validatedData.website || undefined,
             summary: validatedData.summary || '',
-            workExperience: validatedData.workExperience.map(exp => ({
+            workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: (exp as any).companyDescription,
+                companyDescription: (exp as any).companyDescription ? await translateText((exp as any).companyDescription, language) : (exp as any).companyDescription,
                 techStack: (exp as any).techStack,
-            })),
+            }))),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
                 institution: edu.institution,
@@ -1496,15 +1496,17 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: resume.workExperiences?.map((exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: exp.description,
-                companyDescription: exp.companyDescription,
+                description: (() => {
+                    return exp.description;
+                })(),
+                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
                 techStack: exp.techStack,
-            })) || [],
+            }))),
             education: resume.educations?.map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,

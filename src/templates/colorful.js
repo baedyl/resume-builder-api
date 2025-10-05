@@ -199,8 +199,13 @@ function generateColorfulTemplate(data, doc, language = 'en') {
      .text(sectionTitles.languages || 'LANGUAGES', rightColumnX, languagesY);
   
   if (data.languages && data.languages.length > 0) {
+    const { localizeLanguageName, localizeProficiency } = require('../utils/language');
     data.languages.forEach((language, index) => {
-      drawLanguageProficiency(language, rightColumnX, languagesY + 20 + (index * 20));
+      const localized = {
+        name: localizeLanguageName(language.name, language),
+        proficiency: localizeProficiency(language.proficiency, language)
+      };
+      drawLanguageProficiency(localized, rightColumnX, languagesY + 20 + (index * 20));
     });
   }
   
