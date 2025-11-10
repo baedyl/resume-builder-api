@@ -18,7 +18,7 @@ import {
     LanguageSchema, 
     CertificationSchema 
 } from '../utils/validation';
-import { detectLanguage, getLanguageConfig, getLanguageInfo } from '../utils/language';
+import { detectLanguage, getLanguageConfig, getLanguageInfo, normalizeLanguageCode } from '../utils/language';
 import { translateText } from '../utils/openai';
 import { enhanceWithOpenAI } from '../utils/openai';
 import { 
@@ -120,6 +120,96 @@ const ResumeSchema = z.object({
     certifications: z.array(CertificationSchema).default([]),
     language: z.string().optional().default('en'), // Add language parameter
 });
+
+type ResumeSchemaInput = z.infer<typeof ResumeSchema>;
+
+async function translateResumeContent(
+    data: ResumeSchemaInput,
+    targetLanguage: string
+): Promise<ResumeSchemaInput> {
+    const normalizedTarget = normalizeLanguageCode(targetLanguage);
+
+    const detectionCandidates = [
+        data.summary,
+        data.workExperience?.find((exp) => exp.description)?.description,
+        data.education?.find((edu) => edu.description)?.description
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    let sourceLanguage = 'en';
+    for (const candidate of detectionCandidates) {
+        try {
+            const detected = await detectLanguage(candidate);
+            if (detected?.code && detected.code !== 'und') {
+                sourceLanguage = detected.code.toLowerCase();
+                break;
+            }
+        } catch {
+            // ignore detection errors and continue with default sourceLanguage
+        }
+    }
+
+    if (sourceLanguage === normalizedTarget) {
+        return {
+            ...data,
+            language: normalizedTarget,
+        };
+    }
+
+    const translateField = async (text?: string | null): Promise<string | undefined> => {
+        if (text === null || typeof text === 'undefined') return text ?? undefined;
+        const trimmed = text.toString().trim();
+        if (trimmed.length === 0) return text ?? undefined;
+        return await translateText(trimmed, normalizedTarget);
+    };
+
+    const translatedSummary = await translateField(data.summary);
+
+    const translatedWorkExperience = await Promise.all(
+        (data.workExperience || []).map(async (exp) => ({
+            ...exp,
+            jobTitle: (await translateField(exp.jobTitle)) ?? exp.jobTitle,
+            company: exp.company,
+            location: (await translateField(exp.location)) ?? exp.location,
+            description: (await translateField(exp.description)) ?? exp.description,
+            companyDescription: (await translateField(exp.companyDescription)) ?? exp.companyDescription,
+        }))
+    );
+
+    const translatedEducation = await Promise.all(
+        (data.education || []).map(async (edu: any) => ({
+            ...edu,
+            degree: (await translateField(edu.degree)) ?? edu.degree,
+            major: (await translateField(edu.major)) ?? edu.major,
+            institution: edu.institution,
+            description: (await translateField(edu.description)) ?? edu.description,
+        }))
+    );
+
+    const translatedCertifications = await Promise.all(
+        (data.certifications || []).map(async (cert) => ({
+            ...cert,
+            name: (await translateField(cert.name)) ?? cert.name,
+            issuer: cert.issuer,
+        }))
+    );
+
+    const translatedSkills = await Promise.all(
+        (data.skills || []).map(async (skill) => ({
+            ...skill,
+            name: (await translateField(skill.name)) ?? skill.name,
+        }))
+    );
+
+    return {
+        ...data,
+        language: normalizedTarget,
+        summary: translatedSummary ?? undefined,
+        workExperience: translatedWorkExperience,
+        education: translatedEducation,
+        certifications: translatedCertifications,
+        skills: translatedSkills,
+    };
+}
 
 // Looser education schema for updates to allow optional/empty startYear values
 const EducationSchemaUpdate = EducationSchema.extend({
@@ -349,52 +439,60 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
         }
 
         const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
+        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
-        // Convert validated data to HTML format
+        const resumeContent = req.body.language
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : (validatedData.language === normalizedLanguage
+                ? validatedData
+                : { ...validatedData, language: normalizedLanguage });
+
+        // Convert validated (and possibly translated) data to HTML format
         const htmlResumeData = {
-            fullName: validatedData.fullName,
-            email: validatedData.email,
-            phone: validatedData.phone || undefined,
-            address: validatedData.address || undefined,
-            linkedIn: validatedData.linkedIn || undefined,
-            website: validatedData.website || undefined,
-            summary: validatedData.summary || '',
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
+            fullName: resumeContent.fullName,
+            email: resumeContent.email,
+            phone: resumeContent.phone || undefined,
+            address: resumeContent.address || undefined,
+            linkedIn: resumeContent.linkedIn || undefined,
+            website: resumeContent.website || undefined,
+            summary: resumeContent.summary || '',
+            workExperience: (resumeContent.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: (exp as any).companyDescription ? await translateText((exp as any).companyDescription, language) : (exp as any).companyDescription,
+                description: exp.description || '',
+                companyDescription: exp.companyDescription || undefined,
                 techStack: (exp as any).techStack,
-            }))),
-            education: validatedData.education.map(edu => ({
+            })),
+            education: (resumeContent.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: validatedData.languages || [],
-            certifications: validatedData.certifications?.map((cert: any) => ({
+            skills: resumeContent.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: resumeContent.languages || [],
+            certifications: (resumeContent.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            })),
         };
 
         // Determine effective language: prefer provided, else detect from content
-        let effectiveLanguage = validatedData.language || 'en';
+        let effectiveLanguage = (resumeContent.language || normalizedLanguage || 'en').toLowerCase();
         if (!req.body.language) {
             try {
-                const basis = (validatedData.summary || '') || (validatedData.workExperience?.[0]?.description || '');
+                const basis = (resumeContent.summary || '') || (resumeContent.workExperience?.[0]?.description || '');
                 if (basis) {
                     const detected = await detectLanguage(basis);
-                    if (detected?.code) effectiveLanguage = detected.code;
+                    if (detected?.code && detected.code !== 'und') {
+                        effectiveLanguage = detected.code.toLowerCase();
+                    }
                 }
             } catch {}
         }
@@ -650,6 +748,12 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
 
         const validatedData = ResumeUpdateSchema.parse(req.body);
 
+        const skillsProvided = Object.prototype.hasOwnProperty.call(req.body, 'skills');
+        const languagesProvided = Object.prototype.hasOwnProperty.call(req.body, 'languages');
+        const workExperienceProvided = Object.prototype.hasOwnProperty.call(req.body, 'workExperience');
+        const educationProvided = Object.prototype.hasOwnProperty.call(req.body, 'education');
+        const certificationsProvided = Object.prototype.hasOwnProperty.call(req.body, 'certifications');
+
         // Check if resume exists and belongs to user
         const existingResume = await getResumeById(resumeId, userId);
         if (!existingResume) {
@@ -658,13 +762,13 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         }
 
         // Process skills and languages
-        const processedSkills = await processSkills(validatedData.skills);
-        const processedLanguages = await processLanguages(validatedData.languages);
+        const processedSkills = skillsProvided ? await processSkills(validatedData.skills) : [];
+        const processedLanguages = languagesProvided ? await processLanguages(validatedData.languages) : [];
 
         // Handle translation when user wants to change the resume language
         // This will translate content from its detected source language to the target language specified in the request
         if (validatedData.language) {
-            const targetLanguage = validatedData.language.toLowerCase();
+            const targetLanguage = normalizeLanguageCode(validatedData.language);
             
             // Detect source language from the content being updated
             let sourceLanguage = 'en'; // default to English
@@ -770,60 +874,72 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         if (validatedData.summary !== undefined) updateData.summary = validatedData.summary;
         
         // Update skills and languages if provided
-        if (validatedData.skills && validatedData.skills.length > 0) {
+        if (skillsProvided) {
             updateData.skills = { 
-                set: [], // Clear existing connections
-                connect: processedSkills.map((skill) => ({ id: skill.id }))
+                set: [],
+                ...(processedSkills.length > 0 ? { connect: processedSkills.map((skill) => ({ id: skill.id })) } : {})
             };
         }
         
-        if (validatedData.languages && validatedData.languages.length > 0) {
+        if (languagesProvided) {
             updateData.languages = { 
-                set: [], // Clear existing connections
-                connect: processedLanguages.map((lang) => ({ id: lang.id }))
+                set: [],
+                ...(processedLanguages.length > 0 ? { connect: processedLanguages.map((lang) => ({ id: lang.id })) } : {})
             };
         }
         
         // Update work experiences if provided
-        if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+        if (workExperienceProvided) {
             updateData.workExperiences = {
-                deleteMany: {}, // Clear existing work experiences
-                create: validatedData.workExperience.map((exp) => ({
-                    jobTitle: exp.jobTitle,
-                    company: exp.company,
-                    location: exp.location,
-                    startDate: new Date(exp.startDate),
-                    endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
-                    description: exp.description,
-                    companyDescription: exp.companyDescription,
-                    techStack: exp.techStack,
-                })),
+                deleteMany: {},
+                ...(validatedData.workExperience && validatedData.workExperience.length > 0
+                    ? {
+                        create: validatedData.workExperience.map((exp) => ({
+                            jobTitle: exp.jobTitle,
+                            company: exp.company,
+                            location: exp.location,
+                            startDate: new Date(exp.startDate),
+                            endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
+                            description: exp.description,
+                            companyDescription: exp.companyDescription,
+                            techStack: exp.techStack,
+                        })),
+                    }
+                    : {})
             };
         }
         
         // Update educations if provided
-        if (validatedData.education && validatedData.education.length > 0) {
+        if (educationProvided) {
             updateData.educations = {
-                deleteMany: {}, // Clear existing educations
-                create: validatedData.education.map(edu => ({
-                    degree: edu.degree,
-                    institution: edu.institution,
-                    startYear: edu.startYear ?? undefined,
-                    graduationYear: edu.graduationYear,
-                    description: edu.description,
-                })),
+                deleteMany: {},
+                ...(validatedData.education && validatedData.education.length > 0
+                    ? {
+                        create: validatedData.education.map(edu => ({
+                            degree: edu.degree,
+                            institution: edu.institution,
+                            startYear: edu.startYear ?? undefined,
+                            graduationYear: edu.graduationYear,
+                            description: edu.description,
+                        })),
+                    }
+                    : {})
             };
         }
         
         // Update certifications if provided
-        if (validatedData.certifications && validatedData.certifications.length > 0) {
+        if (certificationsProvided) {
             updateData.certifications = {
-                deleteMany: {}, // Clear existing certifications
-                create: validatedData.certifications.map((cert) => ({
-                    name: cert.name,
-                    issuer: cert.issuer,
-                    issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                })),
+                deleteMany: {},
+                ...(validatedData.certifications && validatedData.certifications.length > 0
+                    ? {
+                        create: validatedData.certifications.map((cert) => ({
+                            name: cert.name,
+                            issuer: cert.issuer,
+                            issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                        })),
+                    }
+                    : {})
             };
         }
 

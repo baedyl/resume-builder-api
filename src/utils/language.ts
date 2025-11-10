@@ -182,3 +182,78 @@ export function getLanguageInfo(languageCode: string = 'en'): LanguageInfo {
         instruction: config.instruction
     };
 } 
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+    en: 'en',
+    english: 'en',
+    'en-us': 'en',
+    'en_gb': 'en',
+    'en-gb': 'en',
+    'en_uk': 'en',
+    'en-uk': 'en',
+    fr: 'fr',
+    french: 'fr',
+    francais: 'fr',
+    'fr-fr': 'fr',
+    'fr_fr': 'fr',
+    es: 'es',
+    spanish: 'es',
+    espanol: 'es',
+    castellano: 'es',
+    'es-es': 'es',
+    'es_es': 'es',
+    de: 'de',
+    german: 'de',
+    deutsch: 'de',
+    'de-de': 'de',
+    'de_de': 'de',
+};
+
+function normalizeAliasKey(value: string): string {
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '')
+        .replace(/_/g, '-');
+}
+
+export function normalizeLanguageCode(input?: string | null): string {
+    if (!input || typeof input !== 'string') {
+        return 'en';
+    }
+
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return 'en';
+    }
+
+    const normalized = normalizeAliasKey(trimmed);
+    const asciiNormalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    if (LANGUAGE_CONFIG[normalized as keyof typeof LANGUAGE_CONFIG]) {
+        return normalized;
+    }
+
+    if (LANGUAGE_CONFIG[asciiNormalized as keyof typeof LANGUAGE_CONFIG]) {
+        return asciiNormalized;
+    }
+
+    if (LANGUAGE_ALIASES[normalized]) {
+        return LANGUAGE_ALIASES[normalized];
+    }
+
+    if (LANGUAGE_ALIASES[asciiNormalized]) {
+        return LANGUAGE_ALIASES[asciiNormalized];
+    }
+
+    const match = asciiNormalized.split('-')[0];
+    if (LANGUAGE_CONFIG[match as keyof typeof LANGUAGE_CONFIG]) {
+        return match;
+    }
+
+    if (LANGUAGE_ALIASES[match]) {
+        return LANGUAGE_ALIASES[match];
+    }
+
+    return 'en';
+}
