@@ -211,6 +211,24 @@ async function translateResumeContent(
     };
 }
 
+function normalizeYearValue(value: unknown): number | undefined {
+    if (value === null || typeof value === 'undefined') return undefined;
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    const parsed = parseInt(String(value), 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function normalizeEducationEntries(
+    education?: ResumeSchemaInput['education']
+): ResumeSchemaInput['education'] | undefined {
+    if (!Array.isArray(education)) return education;
+    return education.map((edu) => ({
+        ...edu,
+        startYear: normalizeYearValue((edu as any).startYear),
+        graduationYear: normalizeYearValue((edu as any).graduationYear),
+    }));
+}
+
 // Looser education schema for updates to allow optional/empty startYear values
 const EducationSchemaUpdate = EducationSchema.extend({
     startYear: z.preprocess((val) => {
@@ -762,6 +780,10 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
         }
 
         // Process skills and languages
+        if (educationProvided && Array.isArray(validatedData.education)) {
+            validatedData.education = normalizeEducationEntries(validatedData.education) as any;
+        }
+
         const processedSkills = skillsProvided ? await processSkills(validatedData.skills) : [];
         const processedLanguages = languagesProvided ? await processLanguages(validatedData.languages) : [];
 
@@ -918,8 +940,8 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                         create: validatedData.education.map(edu => ({
                             degree: edu.degree,
                             institution: edu.institution,
-                            startYear: edu.startYear ?? undefined,
-                            graduationYear: edu.graduationYear,
+                            startYear: normalizeYearValue(edu.startYear),
+                            graduationYear: normalizeYearValue((edu as any).graduationYear),
                             description: edu.description,
                         })),
                     }
