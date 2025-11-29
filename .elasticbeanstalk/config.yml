@@ -1,0 +1,22 @@
+branch-defaults:
+  main:
+    environment: ResumeApi-Production
+    group_suffix: null
+environment-defaults:
+  ResumeApi-Production:
+    branch: null
+    repository: null
+global:
+  application_name: resume-builder-api
+  branch: main
+  default_ec2_keyname: null
+  default_platform: Docker running on 64bit Amazon Linux 2
+  default_region: us-east-1
+  include_git_submodules: true
+  instance_profile: null
+  platform_name: null
+  platform_version: null
+  profile: null
+  repository: resume-builder-api
+  sc: git
+  workspace_type: Application

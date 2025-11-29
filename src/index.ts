@@ -2,21 +2,30 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-const express = require('express');
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import resumeRouter from './routes/resume';
 import skillRouter from './routes/skill';
 import coverLetterRouter from './routes/coverLetter';
 import jobRouter from './routes/job';
 import stripeRouter from './routes/stripe';
-import { ensureAuthenticated } from './middleware/auth'; // Adjust path as needed
+import { ensureAuthenticated } from './middleware/auth';
 
 const app = express();
 
 // Configure CORS for your frontend origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : [
+        'http://localhost:5173', 
+        'https://www.proairesume.online', 
+        'https://resume-builder-front.vercel.app'
+      ];
+
 app.use(cors({
-    origin: ['http://localhost:5173', 'https://www.proairesume.online', 'https://resume-builder-front.vercel.app'],
+    origin: allowedOrigins,
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
 }));
 
 // IMPORTANT: Stripe webhook must come BEFORE express.json() to handle raw body
@@ -25,7 +34,8 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req: 
     let event: any;
 
     try {
-        const stripe = require('./lib/stripe').stripe;
+        // Import stripe dynamically to handle CommonJS module
+        const { stripe } = require('./lib/stripe');
         event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
     } catch (err: any) {
         console.log(`Webhook signature verification failed.`, err.message);
@@ -44,6 +54,11 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req: 
 
 // Now add JSON parsing for other routes
 app.use(express.json());
+
+// Health check endpoint for AWS Load Balancer
+app.get('/health', (req: Request, res: Response) => {
+    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
 
 // Protect API routes with authentication middleware
 app.use('/api/resumes', ensureAuthenticated, resumeRouter);
