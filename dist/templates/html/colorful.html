@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{fullName}} - Resume</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Helvetica', 'Arial', sans-serif;
+      line-height: 1.4;
+      color: #000000;
+      background: white;
+    }
+
+    .resume-container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px;
+      background: white;
+    }
+
+    .header {
+      margin-bottom: 30px;
+    }
+
+    .name {
+      font-size: 28px;
+      font-weight: bold;
+      color: #000000;
+      margin-bottom: 8px;
+    }
+
+    .title {
+      font-size: 16px;
+      color: #2E86AB;
+      margin-bottom: 12px;
+    }
+
+    .contact-info {
+      font-size: 12px;
+      color: #000000;
+    }
+
+    .contact-info span {
+      margin-right: 3px;
+    }
+
+    .contact-info span:not(:last-child)::after {
+      content: " | ";
+      margin-left: 3px;
+    }
+
+    .two-column-layout {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .left-column { margin-top: 0; }
+
+    .right-column { 
+      margin-top: 0;
+      overflow-y: auto;
+     }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #000000;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+
+    .experience-entry {
+      margin-bottom: 30px;
+    }
+
+    .job-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #000000;
+    }
+
+    .company-name {
+      font-size: 12px;
+      color: #2E86AB;
+      margin-bottom: 4px;
+    }
+
+    .dates {
+      font-size: 11px;
+      color: #000000;
+      margin-bottom: 12px;
+    }
+
+    .description {
+      font-size: 11px;
+      color: #000000;
+      line-height: 1.5;
+    }
+
+    .summary {
+      margin-bottom: 30px;
+    }
+
+    .summary-content {
+      font-size: 11px;
+      line-height: 1.5;
+      margin-top: 10px;
+    }
+
+    .language-entry {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .language-name {
+      font-size: 11px;
+      font-weight: bold;
+      width: 80px;
+    }
+
+    .language-level {
+      font-size: 10px;
+      margin-left: 10px;
+    }
+
+    .proficiency-circles {
+      display: flex;
+      gap: 4px;
+      margin-left: 10px;
+    }
+
+    .circle {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .circle.filled {
+      background-color: #2E86AB;
+    }
+
+    .circle.empty {
+      border: 1px solid #CCCCCC;
+    }
+
+    .skills {
+      margin-bottom: 30px;
+    }
+
+    .skills-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .skill-tag {
+      background-color: #F5F5F5;
+      color: #000000;
+      padding: 3px 6px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: normal;
+      white-space: nowrap;
+      max-width: fit-content;
+      border: 1px solid blue;
+      /* Debug border */
+    }
+
+    .education-entry {
+      margin-bottom: 20px;
+    }
+
+    .degree {
+      font-size: 14px;
+      font-weight: bold;
+      color: #000000;
+      margin-bottom: 6px;
+    }
+
+    .institution {
+      font-size: 12px;
+      color: #2E86AB;
+      margin-bottom: 4px;
+    }
+
+    .graduation-year {
+      font-size: 11px;
+      color: #000000;
+    }
+
+    @media print {
+      .resume-container {
+        padding: 0px;
+      }
+
+      .two-column-layout {
+        gap: 30px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="resume-container">
+    <div class="header">
+      <div class="name">{{fullName}}</div>
+      <div class="title">Développeur Full Stack</div>
+      <div class="contact-info">
+        {{#phone}}<span>{{phone}}</span>{{/phone}}
+        {{#email}}<span>{{email}}</span>{{/email}}
+        {{#linkedIn}}<span>{{linkedIn}}</span>{{/linkedIn}}
+        {{#address}}<span>{{address}}</span>{{/address}}
+      </div>
+    </div>
+
+    <div class="two-column-layout">
+      <div class="left-column">
+        <div class="experience">
+          <div class="section-title">{{titles.professionalExperience}}</div>
+          {{#workExperience}}
+          <div class="experience-entry">
+            <div class="job-title">{{jobTitle}}</div>
+            <div class="company-name">
+              {{company}}{{#companyDescription}} | {{companyDescription}}{{/companyDescription}} | <span class="dates">{{startDate}} - {{endDate}}</span>
+            </div>
+            {{#tasks}}
+            <div class="description">• {{.}}</div>
+            {{/tasks}}
+            {{#techStack}}<div class="description">{{labels.tech}}: {{techStack}}</div>{{/techStack}}
+          </div>
+          {{/workExperience}}
+        </div>
+
+        <div class="section-title">{{titles.education}}</div>
+        {{#education}}
+        <div class="education">
+          {{#.}}
+          <div class="education-entry">
+            <div class="degree">{{degree}}</div>
+            <div class="institution">{{institution}}</div>
+            <div class="graduation-year">{{#startYear}}{{startYear}}{{#graduationYear}} - {{/graduationYear}}{{/startYear}}{{#graduationYear}}{{graduationYear}}{{/graduationYear}}</div>
+          </div>
+          {{/.}}
+        </div>
+        {{/education}}
+      </div>
+
+      <div class="right-column">
+        <div class="summary">
+          <div class="section-title">{{titles.professionalSummary}}</div>
+          <div class="summary-content">{{summary}}</div>
+        </div>
+
+        <div class="section-title">{{titles.languages}}</div>
+        {{#languages}}
+        <div class="languages">
+          {{#.}}
+          <div class="language-entry">
+            <div class="language-name">{{name}}</div>
+            <div class="language-level">{{proficiency}}</div>
+            <div class="proficiency-circles">
+              {{#proficiencyLevels}}
+              <div class="circle {{#filled}}filled{{/filled}}{{^filled}}empty{{/filled}}"></div>
+              {{/proficiencyLevels}}
+            </div>
+          </div>
+          {{/.}}
+        </div>
+        {{/languages}}
+
+        <div class="section-title">{{titles.skills}}</div>
+        <div class="skills">
+          <div class="skills-grid">
+            {{#skills}}
+            <div class="skill-tag">{{name}}</div>
+            {{/skills}}
+          </div>
+        </div>
+
+        {{#showCertifications}}
+        <div class="section-title">{{titles.certifications}}</div>
+        <div class="education">
+          {{#certifications}}
+          <div class="education-entry">
+            <div class="degree">{{name}}</div>
+            {{#issuer}}<div class="institution">{{issuer}}</div>{{/issuer}}
+            {{#issueDate}}<div class="graduation-year">{{issueDate}}</div>{{/issueDate}}
+          </div>
+          {{/certifications}}
+        </div>
+        {{/showCertifications}}
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>
