@@ -33,15 +33,26 @@ This document provides a quick overview of the AWS deployment configurations cre
 ## Quick Start
 
 ### 1. Prerequisites Setup
+**First, read and follow the [Prerequisites Guide](./PREREQUISITES.md) to install and configure:**
+
 ```bash
-# Install AWS CLI
+# AWS CLI (Required)
 brew install awscli
 
-# Install Elastic Beanstalk CLI
-pip install awsebcli
+# Elastic Beanstalk CLI (Required)
+pip3 install awsebcli
 
-# Configure AWS credentials
+# Docker (Optional but recommended)
+brew install --cask docker
+
+# Configure AWS credentials (Required)
 aws configure
+```
+
+### 2. Verify Installation
+```bash
+# Verify all tools are installed correctly
+eb --version && aws --version && node --version
 ```
 
 ### 2. Environment Configuration

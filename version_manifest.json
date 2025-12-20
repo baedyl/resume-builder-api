@@ -1,0 +1,7 @@
+{
+  "version": "app-fresh-1764389360",
+  "changes": [
+    "Clean deployment without docker-compose.yml",
+    "Includes .env.production for environment variables"
+  ]
+}

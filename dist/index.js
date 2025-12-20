@@ -1,0 +1,65 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+// Load environment variables first
+const dotenv_1 = __importDefault(require("dotenv"));
+dotenv_1.default.config();
+const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
+const resume_1 = __importDefault(require("./routes/resume"));
+const skill_1 = __importDefault(require("./routes/skill"));
+const coverLetter_1 = __importDefault(require("./routes/coverLetter"));
+const job_1 = __importDefault(require("./routes/job"));
+const stripe_1 = __importDefault(require("./routes/stripe"));
+const auth_1 = require("./middleware/auth");
+const app = (0, express_1.default)();
+// Configure CORS for your frontend origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : [
+        'http://localhost:5173',
+        'https://www.proairesume.online',
+        'https://resume-builder-front.vercel.app'
+    ];
+app.use((0, cors_1.default)({
+    origin: allowedOrigins,
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+}));
+// IMPORTANT: Stripe webhook must come BEFORE express.json() to handle raw body
+app.use('/api/stripe/webhook', express_1.default.raw({ type: 'application/json' }), (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+        // Import stripe dynamically to handle CommonJS module
+        const { stripe } = require('./lib/stripe');
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    }
+    catch (err) {
+        console.log(`Webhook signature verification failed.`, err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+    // Import and handle the webhook event
+    const { handleWebhookEvent } = require('./routes/stripe');
+    handleWebhookEvent(event).then(() => {
+        res.json({ received: true });
+    }).catch((error) => {
+        console.error('Webhook handling error:', error);
+        res.status(500).json({ error: 'Webhook handling failed' });
+    });
+});
+// Now add JSON parsing for other routes
+app.use(express_1.default.json());
+// Health check endpoint for AWS Load Balancer
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+// Protect API routes with authentication middleware
+app.use('/api/resumes', auth_1.ensureAuthenticated, resume_1.default);
+app.use('/api/skills', skill_1.default);
+app.use('/api/cover-letter', coverLetter_1.default);
+app.use('/api/jobs', job_1.default);
+app.use('/api/stripe', stripe_1.default);
+app.listen(3000, () => console.log('Server running on port 3000'));

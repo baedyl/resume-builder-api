@@ -1,10 +1,10 @@
-# Use Node.js 18 LTS (AL2) as base image
+# Simplified Dockerfile for AWS Elastic Beanstalk
 FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 COPY tsconfig.json ./
 
@@ -16,17 +16,17 @@ COPY src ./src/
 COPY templates ./templates/
 COPY prisma ./prisma/
 
-# Build the application
-RUN npm run build
+# Build TypeScript (without Prisma generation to avoid WASM issues)
+RUN npx tsc
 
-# Generate Prisma client
-RUN npx prisma generate
+# Copy built files
+RUN cp -r src/templates dist/
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodejs -u 1001
 
-# Change ownership of the app directory
+# Change ownership
 RUN chown -R nodejs:nodejs /app
 USER nodejs
 
@@ -37,5 +37,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => { process.exit(1) })"
 
-# Start the application
+# Start the application (Prisma will generate client on first run)
 CMD ["node", "dist/index.js"]

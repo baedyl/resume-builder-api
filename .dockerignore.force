@@ -1,0 +1,26 @@
+# Force Elastic Beanstalk to use simple Docker (not Docker Compose)
+# Create a .dockerignore that excludes any docker-compose files
+
+# Ensure no docker-compose files exist
+node_modules
+npm-debug.log
+Dockerfile
+.dockerignore
+.git
+.gitignore
+README.md
+.env
+.env.local
+.nyc_output
+coverage
+.coverage
+*.log
+.vscode
+.elasticbeanstalk
+*.config.js
+*.test.js
+*.spec.js
+docker-compose*.yml
+docker-compose*.yaml
+*.compose.yml
+*.compose.yaml

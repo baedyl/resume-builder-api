@@ -7,7 +7,6 @@ Dockerfile
 README.md
 .env
 .env.local
-.env.production
 .nyc_output
 coverage
 .coverage
