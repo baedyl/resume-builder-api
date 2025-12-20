@@ -1,49 +1,42 @@
-import express from 'express';
-import PDFDocument from 'pdfkit';
-import { z } from 'zod';
-import { ensureAuthenticated } from '../middleware/auth';
-import { asyncHandler } from '../utils/asyncHandler';
-import multer, { FileFilterCallback } from 'multer';
-import type { Multer } from 'multer';
-import type { AxiosResponse } from 'axios';
-import axios from 'axios';
-
+"use strict";
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = __importDefault(require("express"));
+const zod_1 = require("zod");
+const auth_1 = require("../middleware/auth");
+const asyncHandler_1 = require("../utils/asyncHandler");
+const multer_1 = __importDefault(require("multer"));
+const axios_1 = __importDefault(require("axios"));
 // Import shared utilities and services
-import { prisma } from '../lib/database';
-import { openai } from '../lib/openai';
-import { 
-    WorkExperienceSchema, 
-    EducationSchema, 
-    SkillSchema, 
-    LanguageSchema, 
-    CertificationSchema 
-} from '../utils/validation';
-import { detectLanguage, getLanguageConfig, getLanguageInfo, normalizeLanguageCode } from '../utils/language';
-import { translateText } from '../utils/openai';
-import { enhanceWithOpenAI } from '../utils/openai';
-import { 
-    handleValidationError, 
-    handleDatabaseError, 
-    handleUnauthorized, 
-    handleNotFound 
-} from '../utils/errorHandling';
-import { 
-    createResume, 
-    getResumeById, 
-    getUserResumes, 
-    processSkills, 
-    processLanguages,
-    type ResumeData 
-} from '../services/resumeService';
-import { generateHTMLResume } from '../services/htmlResumeService';
-import { requirePremium, withPremiumFeatures } from '../middleware/subscription';
-
-const router = express.Router();
-
-async function resolveChromeExecutablePath(puppeteer: any): Promise<string | undefined> {
+const database_1 = require("../lib/database");
+const openai_1 = require("../lib/openai");
+const validation_1 = require("../utils/validation");
+const language_1 = require("../utils/language");
+const openai_2 = require("../utils/openai");
+const openai_3 = require("../utils/openai");
+const errorHandling_1 = require("../utils/errorHandling");
+const resumeService_1 = require("../services/resumeService");
+const htmlResumeService_1 = require("../services/htmlResumeService");
+const subscription_1 = require("../middleware/subscription");
+const router = express_1.default.Router();
+async function resolveChromeExecutablePath(puppeteer) {
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
         const fs = require('fs');
-        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) return process.env.PUPPETEER_EXECUTABLE_PATH;
+        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH))
+            return process.env.PUPPETEER_EXECUTABLE_PATH;
     }
     // Try common Render cache locations for @puppeteer/browsers
     try {
@@ -55,35 +48,41 @@ async function resolveChromeExecutablePath(puppeteer: any): Promise<string | und
             '/opt/render/project/.cache/puppeteer',
             process.env.HOME ? `${process.env.HOME}/.cache/puppeteer` : undefined,
             '/root/.cache/puppeteer'
-        ].filter(Boolean) as string[];
+        ].filter(Boolean);
         for (const cacheDir of candidateCacheRoots) {
-            if (!fs.existsSync(cacheDir)) continue;
+            if (!fs.existsSync(cacheDir))
+                continue;
             const chromeRoot = path.join(cacheDir, 'chrome');
-            if (!fs.existsSync(chromeRoot)) continue;
+            if (!fs.existsSync(chromeRoot))
+                continue;
             const versions = fs.readdirSync(chromeRoot).sort();
             for (let i = versions.length - 1; i >= 0; i--) {
                 const verDir = path.join(chromeRoot, versions[i]);
                 const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
-                if (fs.existsSync(linux64)) return linux64;
+                if (fs.existsSync(linux64))
+                    return linux64;
                 const linux = path.join(verDir, 'chrome-linux', 'chrome');
-                if (fs.existsSync(linux)) return linux;
+                if (fs.existsSync(linux))
+                    return linux;
             }
         }
-    } catch (_) { /* ignore */ }
+    }
+    catch (_) { /* ignore */ }
     try {
         const path = await puppeteer.executablePath();
         const fs = require('fs');
-        if (path && fs.existsSync(path)) return path;
+        if (path && fs.existsSync(path))
+            return path;
         return undefined;
-    } catch (_) {
+    }
+    catch (_) {
         return undefined;
     }
 }
-
 // Helper to send PDFKit documents reliably by buffering and setting Content-Length
-function sendPdfDocument(res: express.Response, doc: any, filename: string): void {
-    const chunks: Buffer[] = [];
-    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+function sendPdfDocument(res, doc, filename) {
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => {
         const pdfBuffer = Buffer.concat(chunks);
         if (!res.headersSent) {
@@ -96,301 +95,241 @@ function sendPdfDocument(res: express.Response, doc: any, filename: string): voi
     doc.on('error', () => {
         if (!res.headersSent) {
             res.status(500).json({ error: 'Failed to generate PDF' });
-        } else {
-            try { res.end(); } catch (_) { /* noop */ }
+        }
+        else {
+            try {
+                res.end();
+            }
+            catch (_) { /* noop */ }
         }
     });
     doc.end();
 }
-
 // Enhanced schemas using shared components
-const ResumeSchema = z.object({
-    id: z.string().optional(),
-    fullName: z.string().min(1, 'Full name is required'),
-    email: z.string().email('Invalid email'),
-    phone: z.string().optional(),
-    address: z.string().optional(),
-    linkedIn: z.string().optional(),
-    website: z.string().optional(),
-    summary: z.string().optional(),
-    skills: z.array(SkillSchema).default([]),
-    workExperience: z.array(WorkExperienceSchema).min(1, 'At least one work experience is required'),
-    education: z.array(EducationSchema).min(1, 'At least one education entry is required'),
-    languages: z.array(LanguageSchema).default([]),
-    certifications: z.array(CertificationSchema).default([]),
-    language: z.string().optional().default('en'), // Add language parameter
+const ResumeSchema = zod_1.z.object({
+    id: zod_1.z.string().optional(),
+    fullName: zod_1.z.string().min(1, 'Full name is required'),
+    email: zod_1.z.string().email('Invalid email'),
+    phone: zod_1.z.string().optional(),
+    address: zod_1.z.string().optional(),
+    linkedIn: zod_1.z.string().optional(),
+    website: zod_1.z.string().optional(),
+    summary: zod_1.z.string().optional(),
+    skills: zod_1.z.array(validation_1.SkillSchema).default([]),
+    workExperience: zod_1.z.array(validation_1.WorkExperienceSchema).min(1, 'At least one work experience is required'),
+    education: zod_1.z.array(validation_1.EducationSchema).min(1, 'At least one education entry is required'),
+    languages: zod_1.z.array(validation_1.LanguageSchema).default([]),
+    certifications: zod_1.z.array(validation_1.CertificationSchema).default([]),
+    language: zod_1.z.string().optional().default('en'), // Add language parameter
 });
-
-type ResumeSchemaInput = z.infer<typeof ResumeSchema>;
-
-async function translateResumeContent(
-    data: ResumeSchemaInput,
-    targetLanguage: string
-): Promise<ResumeSchemaInput> {
-    const normalizedTarget = normalizeLanguageCode(targetLanguage);
-
+async function translateResumeContent(data, targetLanguage) {
+    var _a, _b, _c, _d;
+    const normalizedTarget = (0, language_1.normalizeLanguageCode)(targetLanguage);
     const detectionCandidates = [
         data.summary,
-        data.workExperience?.find((exp) => exp.description)?.description,
-        data.education?.find((edu) => edu.description)?.description
-    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-
+        (_b = (_a = data.workExperience) === null || _a === void 0 ? void 0 : _a.find((exp) => exp.description)) === null || _b === void 0 ? void 0 : _b.description,
+        (_d = (_c = data.education) === null || _c === void 0 ? void 0 : _c.find((edu) => edu.description)) === null || _d === void 0 ? void 0 : _d.description
+    ].filter((value) => typeof value === 'string' && value.trim().length > 0);
     let sourceLanguage = 'en';
     for (const candidate of detectionCandidates) {
         try {
-            const detected = await detectLanguage(candidate);
-            if (detected?.code && detected.code !== 'und') {
+            const detected = await (0, language_1.detectLanguage)(candidate);
+            if ((detected === null || detected === void 0 ? void 0 : detected.code) && detected.code !== 'und') {
                 sourceLanguage = detected.code.toLowerCase();
                 break;
             }
-        } catch {
+        }
+        catch (_e) {
             // ignore detection errors and continue with default sourceLanguage
         }
     }
-
     if (sourceLanguage === normalizedTarget) {
-        return {
-            ...data,
-            language: normalizedTarget,
-        };
+        return Object.assign(Object.assign({}, data), { language: normalizedTarget });
     }
-
-    const translateField = async (text?: string | null): Promise<string | undefined> => {
-        if (text === null || typeof text === 'undefined') return text ?? undefined;
+    const translateField = async (text) => {
+        if (text === null || typeof text === 'undefined')
+            return text !== null && text !== void 0 ? text : undefined;
         const trimmed = text.toString().trim();
-        if (trimmed.length === 0) return text ?? undefined;
-        return await translateText(trimmed, normalizedTarget);
+        if (trimmed.length === 0)
+            return text !== null && text !== void 0 ? text : undefined;
+        return await (0, openai_2.translateText)(trimmed, normalizedTarget);
     };
-
     const translatedSummary = await translateField(data.summary);
-
-    const translatedWorkExperience = await Promise.all(
-        (data.workExperience || []).map(async (exp) => ({
-            ...exp,
-            jobTitle: (await translateField(exp.jobTitle)) ?? exp.jobTitle,
-            company: exp.company,
-            location: (await translateField(exp.location)) ?? exp.location,
-            description: (await translateField(exp.description)) ?? exp.description,
-            companyDescription: (await translateField(exp.companyDescription)) ?? exp.companyDescription,
-        }))
-    );
-
-    const translatedEducation = await Promise.all(
-        (data.education || []).map(async (edu: any) => ({
-            ...edu,
-            degree: (await translateField(edu.degree)) ?? edu.degree,
-            major: (await translateField(edu.major)) ?? edu.major,
-            institution: edu.institution,
-            description: (await translateField(edu.description)) ?? edu.description,
-        }))
-    );
-
-    const translatedCertifications = await Promise.all(
-        (data.certifications || []).map(async (cert) => ({
-            ...cert,
-            name: (await translateField(cert.name)) ?? cert.name,
-            issuer: cert.issuer,
-        }))
-    );
-
-    const translatedSkills = await Promise.all(
-        (data.skills || []).map(async (skill) => ({
-            ...skill,
-            name: (await translateField(skill.name)) ?? skill.name,
-        }))
-    );
-
-    return {
-        ...data,
-        language: normalizedTarget,
-        summary: translatedSummary ?? undefined,
-        workExperience: translatedWorkExperience,
-        education: translatedEducation,
-        certifications: translatedCertifications,
-        skills: translatedSkills,
-    };
+    const translatedWorkExperience = await Promise.all((data.workExperience || []).map(async (exp) => {
+        var _a, _b, _c, _d;
+        return (Object.assign(Object.assign({}, exp), { jobTitle: (_a = (await translateField(exp.jobTitle))) !== null && _a !== void 0 ? _a : exp.jobTitle, company: exp.company, location: (_b = (await translateField(exp.location))) !== null && _b !== void 0 ? _b : exp.location, description: (_c = (await translateField(exp.description))) !== null && _c !== void 0 ? _c : exp.description, companyDescription: (_d = (await translateField(exp.companyDescription))) !== null && _d !== void 0 ? _d : exp.companyDescription }));
+    }));
+    const translatedEducation = await Promise.all((data.education || []).map(async (edu) => {
+        var _a, _b, _c;
+        return (Object.assign(Object.assign({}, edu), { degree: (_a = (await translateField(edu.degree))) !== null && _a !== void 0 ? _a : edu.degree, major: (_b = (await translateField(edu.major))) !== null && _b !== void 0 ? _b : edu.major, institution: edu.institution, description: (_c = (await translateField(edu.description))) !== null && _c !== void 0 ? _c : edu.description }));
+    }));
+    const translatedCertifications = await Promise.all((data.certifications || []).map(async (cert) => {
+        var _a;
+        return (Object.assign(Object.assign({}, cert), { name: (_a = (await translateField(cert.name))) !== null && _a !== void 0 ? _a : cert.name, issuer: cert.issuer }));
+    }));
+    const translatedSkills = await Promise.all((data.skills || []).map(async (skill) => {
+        var _a;
+        return (Object.assign(Object.assign({}, skill), { name: (_a = (await translateField(skill.name))) !== null && _a !== void 0 ? _a : skill.name }));
+    }));
+    return Object.assign(Object.assign({}, data), { language: normalizedTarget, summary: translatedSummary !== null && translatedSummary !== void 0 ? translatedSummary : undefined, workExperience: translatedWorkExperience, education: translatedEducation, certifications: translatedCertifications, skills: translatedSkills });
 }
-
 // Looser education schema for updates to allow optional/empty startYear values
-const EducationSchemaUpdate = EducationSchema.extend({
-    startYear: z.preprocess((val) => {
-        if (val === '' || val === null || typeof val === 'undefined') return undefined;
+const EducationSchemaUpdate = validation_1.EducationSchema.extend({
+    startYear: zod_1.z.preprocess((val) => {
+        if (val === '' || val === null || typeof val === 'undefined')
+            return undefined;
         if (typeof val === 'string') {
             const n = parseInt(val, 10);
             return Number.isNaN(n) ? val : n;
         }
         return val;
-    }, z.number().int().min(1900).max(9999)).optional(),
+    }, zod_1.z.number().int().min(1900).max(9999)).optional(),
 });
-
-const ResumeUpdateSchema = z.object({
-    fullName: z.string().min(1, 'Full name is required').optional(),
-    email: z.string().email('Invalid email').optional(),
-    phone: z.string().optional(),
-    address: z.string().optional(),
-    linkedIn: z.string().optional(),
-    website: z.string().optional(),
-    summary: z.string().optional(),
-    skills: z.array(SkillSchema).default([]),
-    workExperience: z.array(WorkExperienceSchema).optional(),
-    education: z.array(EducationSchemaUpdate).optional(),
-    languages: z.array(LanguageSchema).default([]),
-    certifications: z.array(CertificationSchema).default([]),
-    language: z.string().optional(), // Add language parameter
+const ResumeUpdateSchema = zod_1.z.object({
+    fullName: zod_1.z.string().min(1, 'Full name is required').optional(),
+    email: zod_1.z.string().email('Invalid email').optional(),
+    phone: zod_1.z.string().optional(),
+    address: zod_1.z.string().optional(),
+    linkedIn: zod_1.z.string().optional(),
+    website: zod_1.z.string().optional(),
+    summary: zod_1.z.string().optional(),
+    skills: zod_1.z.array(validation_1.SkillSchema).default([]),
+    workExperience: zod_1.z.array(validation_1.WorkExperienceSchema).optional(),
+    education: zod_1.z.array(EducationSchemaUpdate).optional(),
+    languages: zod_1.z.array(validation_1.LanguageSchema).default([]),
+    certifications: zod_1.z.array(validation_1.CertificationSchema).default([]),
+    language: zod_1.z.string().optional(), // Add language parameter
 });
-
-const EnhanceDescriptionSchema = z.object({
-    jobTitle: z.string().min(1, 'Job title is required'),
-    description: z.string().min(1, 'Description is required'),
-    language: z.string().optional().default('en'), // Add language parameter
+const EnhanceDescriptionSchema = zod_1.z.object({
+    jobTitle: zod_1.z.string().min(1, 'Job title is required'),
+    description: zod_1.z.string().min(1, 'Description is required'),
+    language: zod_1.z.string().optional().default('en'), // Add language parameter
 });
-
-const EnhanceSummarySchema = z.object({
-    summary: z.string().min(1, 'Summary is required'),
-    language: z.string().optional().default('en'), // Add language parameter
+const EnhanceSummarySchema = zod_1.z.object({
+    summary: zod_1.z.string().min(1, 'Summary is required'),
+    language: zod_1.z.string().optional().default('en'), // Add language parameter
 });
-
 // Multer configuration
-const storage = multer.memoryStorage();
-const upload = multer({
+const storage = multer_1.default.memoryStorage();
+const upload = (0, multer_1.default)({
     storage,
     limits: {
         fileSize: 10 * 1024 * 1024, // 10MB limit
     },
-    fileFilter: (req: Express.Request, file: Express.Multer.File, callback: FileFilterCallback) => {
-        if (file.mimetype === 'application/pdf' || 
+    fileFilter: (req, file, callback) => {
+        if (file.mimetype === 'application/pdf' ||
             file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
             file.mimetype === 'application/msword') {
             callback(null, true);
-        } else {
+        }
+        else {
             callback(new Error('Only PDF and Word documents are allowed'));
         }
     },
 });
-
 // POST /api/resumes/enhance-summary
-router.post('/enhance-summary', asyncHandler(async (req: any, res) => {
+router.post('/enhance-summary', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     try {
         const parsed = EnhanceSummarySchema.parse(req.body);
         const { summary, language } = parsed;
-        
         // Always detect language from input text
         let effectiveLanguage = 'en'; // default fallback
         try {
-            const detected = await detectLanguage(summary);
-            if (detected?.code) {
+            const detected = await (0, language_1.detectLanguage)(summary);
+            if (detected === null || detected === void 0 ? void 0 : detected.code) {
                 effectiveLanguage = detected.code;
                 console.log(`Detected language for summary: ${detected.code} (${detected.name})`);
             }
-        } catch (error) {
+        }
+        catch (error) {
             console.warn('Language detection failed for summary, using English:', error);
         }
-        
-        const languageConfig = getLanguageConfig(effectiveLanguage);
-        const languageInfo = getLanguageInfo(effectiveLanguage);
-
+        const languageConfig = (0, language_1.getLanguageConfig)(effectiveLanguage);
+        const languageInfo = (0, language_1.getLanguageInfo)(effectiveLanguage);
         const prompt = `Enhance the following professional summary to be more impactful, ATS-friendly, and compelling. Keep it concise (2-3 sentences) and professional. ${languageInfo.instruction} Original summary: ${summary}`;
-
         // Create language-appropriate fallback content
-        const fallbackContent = effectiveLanguage === 'es' 
+        const fallbackContent = effectiveLanguage === 'es'
             ? "Un profesional dedicado y versátil con una sólida base en su campo. Historial comprobado de entregar resultados y adaptarse a nuevos desafíos. Comprometido con el aprendizaje continuo y el crecimiento profesional."
             : effectiveLanguage === 'fr'
-            ? "Un professionnel dévoué et polyvalent avec une solide base dans son domaine. Antécédents prouvés de livrer des résultats et s'adapter aux nouveaux défis. Engagé dans l'apprentissage continu et la croissance professionnelle."
-            : "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
-
-        const enhancedSummary = await enhanceWithOpenAI(
-            prompt,
-            languageConfig.systemMessage,
-            fallbackContent
-        );
-
+                ? "Un professionnel dévoué et polyvalent avec une solide base dans son domaine. Antécédents prouvés de livrer des résultats et s'adapter aux nouveaux défis. Engagé dans l'apprentissage continu et la croissance professionnelle."
+                : "A dedicated and versatile professional with a strong foundation in their field. Proven track record of delivering results and adapting to new challenges. Committed to continuous learning and professional growth.";
+        const enhancedSummary = await (0, openai_3.enhanceWithOpenAI)(prompt, languageConfig.systemMessage, fallbackContent);
         // Parse the JSON response and extract just the summary text
         let finalSummary = enhancedSummary;
         try {
             const parsed = JSON.parse(enhancedSummary);
             if (parsed.professional_summary) {
                 finalSummary = parsed.professional_summary;
-            } else if (parsed.enhanced_summary) {
+            }
+            else if (parsed.enhanced_summary) {
                 finalSummary = parsed.enhanced_summary;
-            } else if (parsed.summary) {
+            }
+            else if (parsed.summary) {
                 finalSummary = parsed.summary;
-            } else if (typeof parsed === 'string') {
+            }
+            else if (typeof parsed === 'string') {
                 finalSummary = parsed;
             }
-        } catch (error) {
+        }
+        catch (error) {
             // If it's not JSON, use the raw response
             finalSummary = enhancedSummary;
         }
-
         return res.json({ summary: finalSummary });
-    } catch (error) {
-        handleValidationError(error, res);
+    }
+    catch (error) {
+        (0, errorHandling_1.handleValidationError)(error, res);
     }
 }));
-
 // POST /api/resumes/enhance-description
-router.post('/enhance-description', asyncHandler(async (req: any, res) => {
+router.post('/enhance-description', (0, asyncHandler_1.asyncHandler)(async (req, res) => {
     try {
         const parsed = EnhanceDescriptionSchema.parse(req.body);
         const { jobTitle, description, language } = parsed;
-        
         // Always detect language from input text
         let effectiveLanguage = 'en'; // default fallback
         try {
-            const detected = await detectLanguage(description);
-            if (detected?.code) {
+            const detected = await (0, language_1.detectLanguage)(description);
+            if (detected === null || detected === void 0 ? void 0 : detected.code) {
                 effectiveLanguage = detected.code;
                 console.log(`Detected language for description: ${detected.code} (${detected.name})`);
             }
-        } catch (error) {
+        }
+        catch (error) {
             console.warn('Language detection failed for description, using English:', error);
         }
-        
-        const languageConfig = getLanguageConfig(effectiveLanguage);
-        const languageInfo = getLanguageInfo(effectiveLanguage);
-
+        const languageConfig = (0, language_1.getLanguageConfig)(effectiveLanguage);
+        const languageInfo = (0, language_1.getLanguageInfo)(effectiveLanguage);
         const prompt = `Enhance the following job description for a ${jobTitle} position. Make it more impactful with action verbs, quantifiable achievements, and ATS-friendly keywords. Return as bullet points with •. Format with single line breaks between bullet points, no extra spacing. ${languageInfo.instruction} Original: ${description}`;
-
         // Create language-appropriate fallback content
-        const fallbackContent = effectiveLanguage === 'es' 
+        const fallbackContent = effectiveLanguage === 'es'
             ? `• Ejecutó responsabilidades principales como ${jobTitle}, mejorando la productividad del equipo y los resultados del proyecto.\n• Colaboró con partes interesadas para lograr objetivos organizacionales, aprovechando habilidades de experiencia previa.\n• Contribuyó a iniciativas clave, adaptándose a entornos de trabajo dinámicos`
             : effectiveLanguage === 'fr'
-            ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques`
-            : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments`;
-
-        const enhancedDescription = await enhanceWithOpenAI(
-            prompt,
-            languageConfig.systemMessage,
-            fallbackContent
-        );
-
+                ? `• Exécuté les responsabilités principales en tant que ${jobTitle}, améliorant la productivité de l'équipe et les résultats du projet.\n• Collaboré avec les parties prenantes pour atteindre les objectifs organisationnels, en exploitant les compétences de l'expérience précédente.\n• Contribué aux initiatives clés, en s'adaptant aux environnements de travail dynamiques`
+                : `• Performed core responsibilities as a ${jobTitle}, enhancing team productivity and project outcomes.\n• Collaborated with stakeholders to achieve organizational goals, leveraging skills from prior experience.\n• Contributed to key initiatives, adapting to dynamic work environments`;
+        const enhancedDescription = await (0, openai_3.enhanceWithOpenAI)(prompt, languageConfig.systemMessage, fallbackContent);
         return res.json({ data: enhancedDescription });
-    } catch (error) {
-        handleValidationError(error, res);
+    }
+    catch (error) {
+        (0, errorHandling_1.handleValidationError)(error, res);
     }
 }));
-
 // POST /api/resumes/new/pdf - Generate PDF from new resume data without saving
-router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const { template = 'modern', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
-
+        const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
         // Check if user is premium, if not restrict to basic template
-        const isPremium = req.user?.isPremium || false;
+        const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
-
         // Ensure skills are properly formatted for PDF template
-        const pdfData = {
-            ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
+        const pdfData = Object.assign(Object.assign({}, validatedData), { skills: ((_c = validatedData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -398,7 +337,8 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 endDate: exp.endDate,
                 description: (() => {
                     const cd = (exp.companyDescription || '').toString().trim();
-                    if (!cd) return exp.description;
+                    if (!cd)
+                        return exp.description;
                     try {
                         const re = new RegExp(cd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig');
                         return (exp.description || '')
@@ -406,48 +346,45 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                             .replace(/\s{2,}/g, ' ')
                             .replace(/^\s*[•\-|:]+\s*/, '')
                             .trim();
-                    } catch (_) {
+                    }
+                    catch (_) {
                         return exp.description;
                     }
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
-            })))
-        };
-
+            }))) });
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, language);
-
         sendPdfDocument(res, doc, 'resume.pdf');
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'generate PDF');
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'generate PDF');
         }
     }
 }));
-
 // POST /api/resumes/new/html - Generate HTML from new resume data without saving
-router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/new/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
-        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
-
+        const _e = req.body, { template = 'colorful', language = 'en' } = _e, resumeData = __rest(_e, ["template", "language"]);
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
         const resumeContent = req.body.language
             ? await translateResumeContent(validatedData, normalizedLanguage)
             : (validatedData.language === normalizedLanguage
                 ? validatedData
-                : { ...validatedData, language: normalizedLanguage });
-
+                : Object.assign(Object.assign({}, validatedData), { language: normalizedLanguage }));
         // Convert validated (and possibly translated) data to HTML format
         const htmlResumeData = {
             fullName: resumeContent.fullName,
@@ -465,7 +402,7 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 endDate: exp.endDate,
                 description: exp.description || '',
                 companyDescription: exp.companyDescription || undefined,
-                techStack: (exp as any).techStack,
+                techStack: exp.techStack,
             })),
             education: (resumeContent.education || []).map((edu) => ({
                 degree: edu.degree,
@@ -474,72 +411,61 @@ router.post('/new/html', ensureAuthenticated, asyncHandler(async (req: any, res)
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: resumeContent.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            skills: ((_b = resumeContent.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
             languages: resumeContent.languages || [],
-            certifications: (resumeContent.certifications || []).map((cert: any) => ({
+            certifications: (resumeContent.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
             })),
         };
-
         // Determine effective language: prefer provided, else detect from content
         let effectiveLanguage = (resumeContent.language || normalizedLanguage || 'en').toLowerCase();
         if (!req.body.language) {
             try {
-                const basis = (resumeContent.summary || '') || (resumeContent.workExperience?.[0]?.description || '');
+                const basis = (resumeContent.summary || '') || (((_d = (_c = resumeContent.workExperience) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
                 if (basis) {
-                    const detected = await detectLanguage(basis);
-                    if (detected?.code && detected.code !== 'und') {
+                    const detected = await (0, language_1.detectLanguage)(basis);
+                    if ((detected === null || detected === void 0 ? void 0 : detected.code) && detected.code !== 'und') {
                         effectiveLanguage = detected.code.toLowerCase();
                     }
                 }
-            } catch {}
+            }
+            catch (_f) { }
         }
-
-        const html = generateHTMLResume(htmlResumeData, template as string, effectiveLanguage);
-
+        const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'generate HTML');
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'generate HTML');
         }
     }
 }));
-
 // POST /api/resumes/save-and-pdf - Save resume and return PDF
-router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const { template = 'modern', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
-
-        const resume = await createResume({
-            ...validatedData,
-            education: (validatedData.education || []).map((edu: any) => ({
-                ...edu,
-                startYear: edu?.startYear ?? undefined,
-            })),
-            userId
-        } as ResumeData);
-
+        const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
+        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+                var _a;
+                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
+            }), userId }));
         // Check if user is premium, if not restrict to basic template
-        const isPremium = req.user?.isPremium || false;
+        const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
-
         // Ensure skills are properly formatted for PDF template
-        const pdfData = {
-            ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
+        const pdfData = Object.assign(Object.assign({}, validatedData), { skills: ((_c = validatedData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -548,52 +474,45 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
-            })))
-        };
-
+            }))) });
         // Generate PDF using template
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, language);
-
         sendPdfDocument(res, doc, 'resume.pdf');
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'create resume');
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'create resume');
         }
     }
 }));
-
 // GET /api/resumes/:id/download - Download saved resume as PDF (free users allowed)
-router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.get('/:id/download', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language = 'en' } = req.query;
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
-
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Check if user is premium, if not restrict to basic template
-        const isPremium = req.user?.isPremium || false;
-        const finalTemplate = isPremium ? (template as string) : 'modern';
-
+        const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
+        const finalTemplate = isPremium ? template : 'modern';
         // Build data in the shape expected by templates
         const pdfData = {
             fullName: resume.fullName,
@@ -603,7 +522,7 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -611,339 +530,276 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
             }))),
-            education: resume.educations?.map((edu: any) => ({
+            education: ((_c = resume.educations) === null || _c === void 0 ? void 0 : _c.map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            }))) || [],
+            skills: ((_d = resume.skills) === null || _d === void 0 ? void 0 : _d.map((skill) => ({ name: skill.name }))) || [],
             languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            certifications: ((_e = resume.certifications) === null || _e === void 0 ? void 0 : _e.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            }))) || [],
         };
-
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language as string);
-
+        const doc = generateResume(pdfData, finalTemplate, language);
         sendPdfDocument(res, doc, 'resume.pdf');
-    } catch (error) {
-        handleDatabaseError(error, res, 'generate PDF');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'generate PDF');
     }
 }));
-
 // POST /api/resumes - Save resume and return data (for debugging)
-router.post('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const { template = 'modern', ...resumeData } = req.body;
-        console.log('Received work experience count:', resumeData.workExperience?.length || 0);
-        
+        const _f = req.body, { template = 'modern' } = _f, resumeData = __rest(_f, ["template"]);
+        console.log('Received work experience count:', ((_b = resumeData.workExperience) === null || _b === void 0 ? void 0 : _b.length) || 0);
         const validatedData = ResumeSchema.parse(resumeData);
-        console.log('Validated work experience count:', validatedData.workExperience?.length || 0);
-
-        const resume = await createResume({
-            ...validatedData,
-            education: (validatedData.education || []).map((edu: any) => ({
-                ...edu,
-                startYear: edu?.startYear ?? undefined,
-            })),
-            userId
-        } as ResumeData);
-
+        console.log('Validated work experience count:', ((_c = validatedData.workExperience) === null || _c === void 0 ? void 0 : _c.length) || 0);
+        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+                var _a;
+                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
+            }), userId }));
         // Fetch the complete resume with all relations to verify data was saved
-        const completeResume = await getResumeById(resume.id, userId);
-        
-        console.log('Saved work experiences:', completeResume?.workExperiences?.length || 0);
-
+        const completeResume = await (0, resumeService_1.getResumeById)(resume.id, userId);
+        console.log('Saved work experiences:', ((_d = completeResume === null || completeResume === void 0 ? void 0 : completeResume.workExperiences) === null || _d === void 0 ? void 0 : _d.length) || 0);
         // Return the saved resume data instead of PDF for debugging
         res.json({
             success: true,
             resumeId: resume.id,
-            workExperiencesCount: completeResume?.workExperiences?.length || 0,
+            workExperiencesCount: ((_e = completeResume === null || completeResume === void 0 ? void 0 : completeResume.workExperiences) === null || _e === void 0 ? void 0 : _e.length) || 0,
             resume: completeResume
         });
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error saving resume:', error);
-        if (error instanceof z.ZodError) {
+        if (error instanceof zod_1.z.ZodError) {
             console.error('Validation errors:', error.errors);
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'create resume');
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'create resume');
         }
     }
 }));
-
 // GET /api/resumes
-router.get('/', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const resumes = await getUserResumes(userId);
+        const resumes = await (0, resumeService_1.getUserResumes)(userId);
         res.json(resumes);
-    } catch (error) {
-        handleDatabaseError(error, res, 'fetch resumes');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'fetch resumes');
     }
 }));
-
 // GET /api/resumes/:id
-router.get('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.get('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
-
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         res.json(resume);
-    } catch (error) {
-        handleDatabaseError(error, res, 'fetch resume');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'fetch resume');
     }
 }));
-
 // PUT /api/resumes/:id - Update a specific resume
-router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.put('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
         const validatedData = ResumeUpdateSchema.parse(req.body);
-
         const skillsProvided = Object.prototype.hasOwnProperty.call(req.body, 'skills');
         const languagesProvided = Object.prototype.hasOwnProperty.call(req.body, 'languages');
         const workExperienceProvided = Object.prototype.hasOwnProperty.call(req.body, 'workExperience');
         const educationProvided = Object.prototype.hasOwnProperty.call(req.body, 'education');
         const certificationsProvided = Object.prototype.hasOwnProperty.call(req.body, 'certifications');
-
         // Check if resume exists and belongs to user
-        const existingResume = await getResumeById(resumeId, userId);
+        const existingResume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!existingResume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Process skills and languages
-        const processedSkills = skillsProvided ? await processSkills(validatedData.skills) : [];
-        const processedLanguages = languagesProvided ? await processLanguages(validatedData.languages) : [];
-
+        const processedSkills = skillsProvided ? await (0, resumeService_1.processSkills)(validatedData.skills) : [];
+        const processedLanguages = languagesProvided ? await (0, resumeService_1.processLanguages)(validatedData.languages) : [];
         // Handle translation when user wants to change the resume language
         // This will translate content from its detected source language to the target language specified in the request
         if (validatedData.language) {
-            const targetLanguage = normalizeLanguageCode(validatedData.language);
-            
+            const targetLanguage = (0, language_1.normalizeLanguageCode)(validatedData.language);
             // Detect source language from the content being updated
             let sourceLanguage = 'en'; // default to English
             if (validatedData.summary) {
                 try {
-                    const detected = await detectLanguage(validatedData.summary);
+                    const detected = await (0, language_1.detectLanguage)(validatedData.summary);
                     sourceLanguage = detected.code;
-                } catch (error) {
+                }
+                catch (error) {
                     console.warn('Language detection failed, defaulting to English:', error);
                 }
-            } else if (validatedData.workExperience && validatedData.workExperience.length > 0) {
+            }
+            else if (validatedData.workExperience && validatedData.workExperience.length > 0) {
                 try {
                     const firstExp = validatedData.workExperience[0];
                     const textToDetect = [firstExp.jobTitle, firstExp.description].filter(Boolean).join(' ');
                     if (textToDetect) {
-                        const detected = await detectLanguage(textToDetect);
+                        const detected = await (0, language_1.detectLanguage)(textToDetect);
                         sourceLanguage = detected.code;
                     }
-                } catch (error) {
+                }
+                catch (error) {
                     console.warn('Language detection failed, defaulting to English:', error);
                 }
             }
-
             // Only translate if source and target languages are different
             if (sourceLanguage !== targetLanguage) {
                 console.log(`Translating resume content from ${sourceLanguage} to ${targetLanguage}`);
                 console.log(`Source language detected from: ${validatedData.summary ? 'summary' : 'work experience'}`);
-                
                 // Fields that get translated:
                 // - Summary, job titles, descriptions, degrees, certifications
                 // - Skills (technical terms that might benefit from translation)
                 // - Language proficiency levels (e.g., "Fluent" -> "Courant")
-                
                 // Fields that are preserved (typically proper nouns):
                 // - Company names, institution names, issuer names
                 // - Language names (e.g., "English", "French")
-                
                 if (validatedData.summary) {
-                    validatedData.summary = await translateText(validatedData.summary, targetLanguage);
+                    validatedData.summary = await (0, openai_2.translateText)(validatedData.summary, targetLanguage);
                 }
-                
                 if (validatedData.workExperience && validatedData.workExperience.length > 0) {
-                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
-                        ...exp,
-                        jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, targetLanguage) : exp.jobTitle,
-                        company: exp.company, // company names typically unchanged
-                        location: exp.location ? await translateText(exp.location, targetLanguage) : exp.location,
-                        description: exp.description ? await translateText(exp.description, targetLanguage) : exp.description,
-                    })));
+                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => (Object.assign(Object.assign({}, exp), { jobTitle: exp.jobTitle ? await (0, openai_2.translateText)(exp.jobTitle, targetLanguage) : exp.jobTitle, company: exp.company, location: exp.location ? await (0, openai_2.translateText)(exp.location, targetLanguage) : exp.location, description: exp.description ? await (0, openai_2.translateText)(exp.description, targetLanguage) : exp.description }))));
                 }
-                
                 if (validatedData.education && validatedData.education.length > 0) {
-                    validatedData.education = await Promise.all(validatedData.education.map(async (edu) => ({
-                        ...edu,
-                        degree: edu.degree ? await translateText(edu.degree, targetLanguage) : edu.degree,
-                        major: edu.major ? await translateText(edu.major, targetLanguage) : edu.major,
-                        institution: edu.institution, // proper noun
-                        description: edu.description ? await translateText(edu.description, targetLanguage) : edu.description,
-                    })));
+                    validatedData.education = await Promise.all(validatedData.education.map(async (edu) => (Object.assign(Object.assign({}, edu), { degree: edu.degree ? await (0, openai_2.translateText)(edu.degree, targetLanguage) : edu.degree, major: edu.major ? await (0, openai_2.translateText)(edu.major, targetLanguage) : edu.major, institution: edu.institution, description: edu.description ? await (0, openai_2.translateText)(edu.description, targetLanguage) : edu.description }))));
                 }
-                
                 if (validatedData.certifications && validatedData.certifications.length > 0) {
-                    validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => ({
-                        ...cert,
-                        name: cert.name ? await translateText(cert.name, targetLanguage) : cert.name,
-                        issuer: cert.issuer, // proper noun
-                    })));
+                    validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => (Object.assign(Object.assign({}, cert), { name: cert.name ? await (0, openai_2.translateText)(cert.name, targetLanguage) : cert.name, issuer: cert.issuer }))));
                 }
-                
                 // Translate skills (technical terms, but some might benefit from translation)
                 if (validatedData.skills && validatedData.skills.length > 0) {
-                    validatedData.skills = await Promise.all(validatedData.skills.map(async (skill) => ({
-                        ...skill,
-                        name: skill.name ? await translateText(skill.name, targetLanguage) : skill.name,
-                    })));
+                    validatedData.skills = await Promise.all(validatedData.skills.map(async (skill) => (Object.assign(Object.assign({}, skill), { name: skill.name ? await (0, openai_2.translateText)(skill.name, targetLanguage) : skill.name }))));
                 }
-                
                 // Translate language proficiency levels
                 if (validatedData.languages && validatedData.languages.length > 0) {
-                    validatedData.languages = await Promise.all(validatedData.languages.map(async (lang) => ({
-                        ...lang,
-                        name: lang.name, // language names are typically kept as-is (e.g., "English", "French")
-                        proficiency: lang.proficiency ? await translateText(lang.proficiency, targetLanguage) : lang.proficiency,
-                    })));
+                    validatedData.languages = await Promise.all(validatedData.languages.map(async (lang) => (Object.assign(Object.assign({}, lang), { name: lang.name, proficiency: lang.proficiency ? await (0, openai_2.translateText)(lang.proficiency, targetLanguage) : lang.proficiency }))));
                 }
-                
                 console.log(`Translation completed for ${targetLanguage}`);
-            } else {
+            }
+            else {
                 console.log(`No translation needed: content is already in ${targetLanguage}`);
             }
         }
-
         // Update the resume with cascade updates
-        const updateData: any = {};
-        
+        const updateData = {};
         // Only update fields that are provided
-        if (validatedData.fullName !== undefined) updateData.fullName = validatedData.fullName;
-        if (validatedData.email !== undefined) updateData.email = validatedData.email;
-        if (validatedData.phone !== undefined) updateData.phone = validatedData.phone;
-        if (validatedData.address !== undefined) updateData.address = validatedData.address;
-        if (validatedData.linkedIn !== undefined) updateData.linkedIn = validatedData.linkedIn;
-        if (validatedData.website !== undefined) updateData.website = validatedData.website;
-        if (validatedData.summary !== undefined) updateData.summary = validatedData.summary;
-        
+        if (validatedData.fullName !== undefined)
+            updateData.fullName = validatedData.fullName;
+        if (validatedData.email !== undefined)
+            updateData.email = validatedData.email;
+        if (validatedData.phone !== undefined)
+            updateData.phone = validatedData.phone;
+        if (validatedData.address !== undefined)
+            updateData.address = validatedData.address;
+        if (validatedData.linkedIn !== undefined)
+            updateData.linkedIn = validatedData.linkedIn;
+        if (validatedData.website !== undefined)
+            updateData.website = validatedData.website;
+        if (validatedData.summary !== undefined)
+            updateData.summary = validatedData.summary;
         // Update skills and languages if provided
         if (skillsProvided) {
-            updateData.skills = { 
-                set: [],
-                ...(processedSkills.length > 0 ? { connect: processedSkills.map((skill) => ({ id: skill.id })) } : {})
-            };
+            updateData.skills = Object.assign({ set: [] }, (processedSkills.length > 0 ? { connect: processedSkills.map((skill) => ({ id: skill.id })) } : {}));
         }
-        
         if (languagesProvided) {
-            updateData.languages = { 
-                set: [],
-                ...(processedLanguages.length > 0 ? { connect: processedLanguages.map((lang) => ({ id: lang.id })) } : {})
-            };
+            updateData.languages = Object.assign({ set: [] }, (processedLanguages.length > 0 ? { connect: processedLanguages.map((lang) => ({ id: lang.id })) } : {}));
         }
-        
         // Update work experiences if provided
         if (workExperienceProvided) {
-            updateData.workExperiences = {
-                deleteMany: {},
-                ...(validatedData.workExperience && validatedData.workExperience.length > 0
-                    ? {
-                        create: validatedData.workExperience.map((exp) => ({
-                            jobTitle: exp.jobTitle,
-                            company: exp.company,
-                            location: exp.location,
-                            startDate: new Date(exp.startDate),
-                            endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
-                            description: exp.description,
-                            companyDescription: exp.companyDescription,
-                            techStack: exp.techStack,
-                        })),
-                    }
-                    : {})
-            };
+            updateData.workExperiences = Object.assign({ deleteMany: {} }, (validatedData.workExperience && validatedData.workExperience.length > 0
+                ? {
+                    create: validatedData.workExperience.map((exp) => ({
+                        jobTitle: exp.jobTitle,
+                        company: exp.company,
+                        location: exp.location,
+                        startDate: new Date(exp.startDate),
+                        endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
+                        description: exp.description,
+                        companyDescription: exp.companyDescription,
+                        techStack: exp.techStack,
+                    })),
+                }
+                : {}));
         }
-        
         // Update educations if provided
         if (educationProvided) {
-            updateData.educations = {
-                deleteMany: {},
-                ...(validatedData.education && validatedData.education.length > 0
-                    ? {
-                        create: validatedData.education.map(edu => ({
+            updateData.educations = Object.assign({ deleteMany: {} }, (validatedData.education && validatedData.education.length > 0
+                ? {
+                    create: validatedData.education.map(edu => {
+                        var _a;
+                        return ({
                             degree: edu.degree,
                             institution: edu.institution,
-                            startYear: edu.startYear ?? undefined,
+                            startYear: (_a = edu.startYear) !== null && _a !== void 0 ? _a : undefined,
                             graduationYear: edu.graduationYear,
                             description: edu.description,
-                        })),
-                    }
-                    : {})
-            };
+                        });
+                    }),
+                }
+                : {}));
         }
-        
         // Update certifications if provided
         if (certificationsProvided) {
-            updateData.certifications = {
-                deleteMany: {},
-                ...(validatedData.certifications && validatedData.certifications.length > 0
-                    ? {
-                        create: validatedData.certifications.map((cert) => ({
-                            name: cert.name,
-                            issuer: cert.issuer,
-                            issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                        })),
-                    }
-                    : {})
-            };
+            updateData.certifications = Object.assign({ deleteMany: {} }, (validatedData.certifications && validatedData.certifications.length > 0
+                ? {
+                    create: validatedData.certifications.map((cert) => ({
+                        name: cert.name,
+                        issuer: cert.issuer,
+                        issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                    })),
+                }
+                : {}));
         }
-
-        const updatedResume = await prisma.resume.update({
+        const updatedResume = await database_1.prisma.resume.update({
             where: { id: resumeId },
             data: updateData,
             include: {
@@ -954,91 +810,82 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 certifications: true,
             },
         });
-
         res.json(updatedResume);
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'update resume');
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'update resume');
         }
     }
 }));
-
 // DELETE /api/resumes/:id - Delete a specific resume
-router.delete('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.delete('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
         // Check if resume exists and belongs to user
-        const existingResume = await getResumeById(resumeId, userId);
+        const existingResume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!existingResume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Delete the resume (cascading deletes will handle related records)
-        await prisma.resume.delete({
+        await database_1.prisma.resume.delete({
             where: { id: resumeId },
         });
-
         res.status(204).send();
-    } catch (error) {
-        handleDatabaseError(error, res, 'delete resume');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'delete resume');
     }
 }));
-
 // Dashboard stats endpoint
-router.get('/dashboard/stats', ensureAuthenticated, asyncHandler(async (req: any, res) => {
-    const userId = req.user?.sub;
+router.get('/dashboard/stats', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
+    const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
     if (!userId) {
         return res.status(400).json({ error: 'User ID required' });
     }
-    
     try {
         // Get resume count
-        const resumeCount = await prisma.resume.count({
+        const resumeCount = await database_1.prisma.resume.count({
             where: { userId }
         });
-        
         // Get cover letter count
-        const coverLetterCount = await prisma.coverLetter.count({
+        const coverLetterCount = await database_1.prisma.coverLetter.count({
             where: { userId }
         });
-        
         // Get job tracking stats
-        const jobs = await prisma.job.findMany({
+        const jobs = await database_1.prisma.job.findMany({
             where: { userId },
             select: { status: true }
         });
-        
         const totalJobs = jobs.length;
-        const appliedJobs = jobs.filter((job: any) => job.status === 'applied').length;
-        const interviewingJobs = jobs.filter((job: any) => job.status === 'interviewing').length;
-        const rejectedJobs = jobs.filter((job: any) => job.status === 'rejected').length;
-        const offerJobs = jobs.filter((job: any) => job.status === 'offer').length;
-        const withdrawnJobs = jobs.filter((job: any) => job.status === 'withdrawn').length;
-        const pendingJobs = jobs.filter((job: any) => job.status === 'pending').length;
-        const followUpJobs = jobs.filter((job: any) => job.status === 'follow-up').length;
-        
+        const appliedJobs = jobs.filter((job) => job.status === 'applied').length;
+        const interviewingJobs = jobs.filter((job) => job.status === 'interviewing').length;
+        const rejectedJobs = jobs.filter((job) => job.status === 'rejected').length;
+        const offerJobs = jobs.filter((job) => job.status === 'offer').length;
+        const withdrawnJobs = jobs.filter((job) => job.status === 'withdrawn').length;
+        const pendingJobs = jobs.filter((job) => job.status === 'pending').length;
+        const followUpJobs = jobs.filter((job) => job.status === 'follow-up').length;
         // Calculate response rate
         const responseCounts = interviewingJobs + offerJobs + pendingJobs + followUpJobs;
         const responseRate = totalJobs > 0 ? Math.round((responseCounts / totalJobs) * 100) : 0;
         const interviewRate = totalJobs > 0 ? Math.round((interviewingJobs / totalJobs) * 100) : 0;
         const offerRate = totalJobs > 0 ? Math.round((offerJobs / totalJobs) * 100) : 0;
-        
         // Get user subscription status
-        const user = await prisma.user.findUnique({
+        const user = await database_1.prisma.user.findUnique({
             where: { id: userId },
             select: {
                 planType: true,
@@ -1046,17 +893,15 @@ router.get('/dashboard/stats', ensureAuthenticated, asyncHandler(async (req: any
                 subscriptionEnd: true
             }
         });
-        
-        const isPremium = Boolean(user?.planType === 'premium' && 
-                         user.subscriptionStatus === 'active' &&
-                         user.subscriptionEnd && 
-                         new Date(user.subscriptionEnd) > new Date());
-        
+        const isPremium = Boolean((user === null || user === void 0 ? void 0 : user.planType) === 'premium' &&
+            user.subscriptionStatus === 'active' &&
+            user.subscriptionEnd &&
+            new Date(user.subscriptionEnd) > new Date());
         const dashboardStats = {
             user: {
                 isPremium,
-                planType: user?.planType || 'free',
-                subscriptionStatus: user?.subscriptionStatus || 'none'
+                planType: (user === null || user === void 0 ? void 0 : user.planType) || 'free',
+                subscriptionStatus: (user === null || user === void 0 ? void 0 : user.subscriptionStatus) || 'none'
             },
             resumes: {
                 total: resumeCount
@@ -1082,41 +927,35 @@ router.get('/dashboard/stats', ensureAuthenticated, asyncHandler(async (req: any
                 }
             }
         };
-        
         res.json(dashboardStats);
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Dashboard stats error:', error);
         res.status(500).json({ error: 'Failed to fetch dashboard stats' });
     }
 }));
-
 // POST /api/resumes/:id/pdf
-router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.post('/:id/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language: reqLanguage } = req.body;
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
-
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Check if user is premium, if not restrict to basic template
-        const isPremium = req.user?.isPremium || false;
+        const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
-
         // Convert resume data to PDF format
         const pdfData = {
             fullName: resume.fullName,
@@ -1126,7 +965,7 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -1134,79 +973,73 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, reqLanguage as string) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, reqLanguage) : exp.companyDescription,
                 techStack: exp.techStack,
             }))) || [],
-            education: resume.educations?.map((edu: any) => ({
+            education: ((_c = resume.educations) === null || _c === void 0 ? void 0 : _c.map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            }))) || [],
+            skills: ((_d = resume.skills) === null || _d === void 0 ? void 0 : _d.map((skill) => ({ name: skill.name }))) || [],
             languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            certifications: ((_e = resume.certifications) === null || _e === void 0 ? void 0 : _e.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            }))) || [],
         };
-
         // Generate PDF using template
         // Determine language: use provided or detect from content
-        let effectiveLanguage = (reqLanguage as string) || 'en';
+        let effectiveLanguage = reqLanguage || 'en';
         try {
             if (!reqLanguage) {
-                const basis = resume.summary || resume.workExperiences?.[0]?.description || '';
+                const basis = resume.summary || ((_g = (_f = resume.workExperiences) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.description) || '';
                 if (basis && basis.length > 0) {
-                    const detected = await detectLanguage(basis);
-                    if (detected?.code) effectiveLanguage = detected.code;
+                    const detected = await (0, language_1.detectLanguage)(basis);
+                    if (detected === null || detected === void 0 ? void 0 : detected.code)
+                        effectiveLanguage = detected.code;
                 }
             }
-        } catch {}
-
+        }
+        catch (_h) { }
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, effectiveLanguage);
-
         sendPdfDocument(res, doc, 'resume.pdf');
-    } catch (error) {
-        handleDatabaseError(error, res, 'generate PDF');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'generate PDF');
     }
 }));
-
 // POST /api/resumes/:id/enhance-pdf - Keep premium only
-router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandler(async (req: any, res) => {
+router.post('/:id/enhance-pdf', auth_1.ensureAuthenticated, subscription_1.requirePremium, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e, _f, _g;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { jobDescription, template = 'modern', language = 'en' } = req.body;
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
         if (!jobDescription || typeof jobDescription !== 'string') {
             return res.status(400).json({ error: 'Job description is required' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Get language configuration
-        const languageConfig = getLanguageConfig(language);
-        const languageInfo = getLanguageInfo(language);
-
+        const languageConfig = (0, language_1.getLanguageConfig)(language);
+        const languageInfo = (0, language_1.getLanguageInfo)(language);
         // Prepare resume data for enhancement
-        const resumeData: any = {
+        const resumeData = {
             fullName: resume.fullName,
             email: resume.email,
             phone: resume.phone,
@@ -1216,7 +1049,7 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
             summary: resume.summary,
             skills: resume.skills,
             languages: resume.languages,
-            workExperience: resume.workExperiences?.map((exp: any) => ({
+            workExperience: ((_b = resume.workExperiences) === null || _b === void 0 ? void 0 : _b.map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -1225,39 +1058,32 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
                 description: exp.description,
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            })) || [],
-            education: resume.educations?.map((edu: any) => ({
+            }))) || [],
+            education: ((_c = resume.educations) === null || _c === void 0 ? void 0 : _c.map((edu) => ({
                 degree: edu.degree,
                 major: edu.major,
                 institution: edu.institution,
                 graduationYear: edu.graduationYear,
                 gpa: edu.gpa,
                 description: edu.description,
-            })) || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            }))) || [],
+            certifications: ((_d = resume.certifications) === null || _d === void 0 ? void 0 : _d.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate,
-            })) || [],
+            }))) || [],
         };
-
         // Extract and match skills from job description
         console.log('Extracting skills from job description...');
         const matchedSkills = await extractAndMatchSkills(jobDescription, resume.skills || [], language);
         console.log(`Found ${matchedSkills.length} matched skills from job description`);
-        
         // Create enhanced skills list combining matched skills with existing resume skills
         const enhancedSkills = [...(resume.skills || []), ...matchedSkills];
-        
         // Remove duplicates based on skill name
-        const uniqueSkills = enhancedSkills.filter((skill, index, self) => 
-            index === self.findIndex(s => s.name.toLowerCase() === skill.name.toLowerCase())
-        );
-        
+        const uniqueSkills = enhancedSkills.filter((skill, index, self) => index === self.findIndex(s => s.name.toLowerCase() === skill.name.toLowerCase()));
         console.log(`Total unique skills for enhancement: ${uniqueSkills.length}`);
         console.log('Skills to include:', uniqueSkills.map(skill => skill.name));
-
-        const prompt: string = `You are an expert resume strategist and professional writer. Your task is to rewrite the provided resume to specifically target the Job Description (JD) provided.
+        const prompt = `You are an expert resume strategist and professional writer. Your task is to rewrite the provided resume to specifically target the Job Description (JD) provided.
 
 OBJECTIVE:
 Create a "tailored" version of this resume that scores highly on ATS (Applicant Tracking Systems) and appeals to human recruiters for this specific role.
@@ -1317,51 +1143,45 @@ Return the enhanced resume as structured JSON matching this format:
   "certifications": [{ "name": "...", "issuer": "...", "issueDate": "..." }]
 }
 `;
-
         // Call OpenAI to enhance the resume
         let enhancedResume = null;
         const maxRetries = 2;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const response = await openai.chat.completions.create({
+                const response = await openai_1.openai.chat.completions.create({
                     model: 'gpt-5.2',
                     messages: [
                         { role: 'system', content: languageConfig.systemMessage },
                         { role: 'user', content: prompt },
                     ],
-                    response_format: { type: 'json_object' },
-                    temperature: 0.5,
-                    max_completion_tokens: 2500,
+                    temperature: 0.7,
+                    max_completion_tokens: 2000,
                 });
-
-                const content = response.choices[0]?.message?.content?.trim();
+                const content = (_g = (_f = (_e = response.choices[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g.trim();
                 if (content) {
-                    enhancedResume = tryParseJsonObject(content);
-                    if (enhancedResume) break;
-                    console.warn(`JSON parse error on attempt ${attempt}: unable to parse model output as JSON object`);
+                    try {
+                        enhancedResume = JSON.parse(content);
+                        break;
+                    }
+                    catch (parseError) {
+                        console.warn(`JSON parse error on attempt ${attempt}:`, parseError);
+                    }
                 }
-            } catch (apiError) {
+            }
+            catch (apiError) {
                 console.error(`API error on attempt ${attempt}:`, apiError);
                 if (attempt === maxRetries) {
                     throw apiError;
                 }
             }
         }
-
         if (!enhancedResume) {
             return res.status(500).json({ error: 'Failed to enhance resume' });
         }
-
         // Save the enhanced resume to the database
-        const processedSkills = await processSkills(enhancedResume.skills || []);
-        const processedLanguages = await processLanguages(enhancedResume.languages || []);
-
-        // Be tolerant to slight key name variations from the model
-        const finalWorkExperience = (enhancedResume as any).workExperience || (enhancedResume as any).workExperiences || [];
-        const finalEducation = (enhancedResume as any).education || (enhancedResume as any).educations || [];
-        const finalCertifications = (enhancedResume as any).certifications || [];
-
-        const savedResume = await prisma.resume.create({
+        const processedSkills = await (0, resumeService_1.processSkills)(enhancedResume.skills || []);
+        const processedLanguages = await (0, resumeService_1.processLanguages)(enhancedResume.languages || []);
+        const savedResume = await database_1.prisma.resume.create({
             data: {
                 userId,
                 fullName: enhancedResume.fullName,
@@ -1374,7 +1194,7 @@ Return the enhanced resume as structured JSON matching this format:
                 skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
                 languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
                 workExperiences: {
-                    create: (finalWorkExperience || []).map((exp: any) => ({
+                    create: (enhancedResume.workExperience || []).map((exp) => ({
                         jobTitle: exp.jobTitle,
                         company: exp.company,
                         location: exp.location,
@@ -1386,7 +1206,7 @@ Return the enhanced resume as structured JSON matching this format:
                     })),
                 },
                 educations: {
-                    create: (finalEducation || []).map((edu: any) => ({
+                    create: (enhancedResume.education || []).map((edu) => ({
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
@@ -1397,7 +1217,7 @@ Return the enhanced resume as structured JSON matching this format:
                     })),
                 },
                 certifications: {
-                    create: (finalCertifications || []).map((cert: any) => ({
+                    create: (enhancedResume.certifications || []).map((cert) => ({
                         name: cert.name,
                         issuer: cert.issuer,
                         issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
@@ -1405,7 +1225,6 @@ Return the enhanced resume as structured JSON matching this format:
                 },
             },
         });
-
         // Return JSON response similar to upload endpoint
         return res.json({
             enhanced: enhancedResume,
@@ -1414,34 +1233,31 @@ Return the enhanced resume as structured JSON matching this format:
             matchedSkills: uniqueSkills.map(skill => skill.name),
             totalSkillsMatched: uniqueSkills.length
         });
-    } catch (error: any) {
+    }
+    catch (error) {
         console.error('Error in enhance-pdf endpoint:', error);
         res.status(500).json({ error: 'Failed to enhance resume' });
     }
 }));
-
 // POST /api/resumes/:id/html - Get resume as HTML
-router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res) => {
+router.post('/:id/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e, _f;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'colorful', language = 'en' } = req.query as any;
-
+        const { template = 'colorful', language = 'en' } = req.query;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Convert resume data to HTML format
         const resumeData = {
             fullName: resume.fullName,
@@ -1451,75 +1267,68 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
             }))) || [],
-            education: resume.educations?.map((edu: any) => ({
+            education: ((_b = resume.educations) === null || _b === void 0 ? void 0 : _b.map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            }))) || [],
+            skills: ((_c = resume.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
             languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            certifications: ((_d = resume.certifications) === null || _d === void 0 ? void 0 : _d.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            }))) || [],
         };
-
         // Determine effective language for preview: prefer query param, else detect
-        let effectiveLanguage = (language as string) || 'en';
+        let effectiveLanguage = language || 'en';
         if (!req.query.language) {
             try {
-                const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
+                const basis = (resume.summary || '') || (((_f = (_e = resume.workExperiences) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.description) || '');
                 if (basis) {
-                    const detected = await detectLanguage(basis);
-                    if (detected?.code) effectiveLanguage = detected.code;
+                    const detected = await (0, language_1.detectLanguage)(basis);
+                    if (detected === null || detected === void 0 ? void 0 : detected.code)
+                        effectiveLanguage = detected.code;
                 }
-            } catch {}
+            }
+            catch (_g) { }
         }
-
-        const html = generateHTMLResume(resumeData, template as string, effectiveLanguage);
-
+        const html = (0, htmlResumeService_1.generateHTMLResume)(resumeData, template, effectiveLanguage);
         res.setHeader('Content-Type', 'text/html');
         res.send(html);
-    } catch (error: any) {
+    }
+    catch (error) {
         console.error('Error in HTML resume endpoint:', error);
         res.status(500).json({ error: 'Failed to generate HTML resume' });
     }
 }));
-
 // POST /api/resumes/save-and-html-pdf - Save new resume and return PDF from HTML template
-router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
-
+        const _f = req.body, { template = 'colorful', language = 'en' } = _f, resumeData = __rest(_f, ["template", "language"]);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
         // Save the resume to database first
-        const resume = await createResume({
-            ...validatedData,
-            education: (validatedData.education || []).map((edu: any) => ({
-                ...edu,
-                startYear: edu?.startYear ?? undefined,
-            })),
-            userId
-        } as ResumeData);
-
+        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+                var _a;
+                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
+            }), userId }));
         // Convert resume data to HTML format
         const htmlResumeData = {
             fullName: validatedData.fullName,
@@ -1535,8 +1344,8 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: (exp as any).companyDescription ? await translateText((exp as any).companyDescription, language) : (exp as any).companyDescription,
-                techStack: (exp as any).techStack,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                techStack: exp.techStack,
             }))),
             education: validatedData.education.map(edu => ({
                 degree: edu.degree,
@@ -1545,43 +1354,42 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            skills: ((_b = validatedData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
             languages: validatedData.languages || [],
-            certifications: validatedData.certifications?.map((cert: any) => ({
+            certifications: ((_c = validatedData.certifications) === null || _c === void 0 ? void 0 : _c.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            }))) || [],
         };
-
         // Generate HTML
         // Determine effective language: prefer provided, else detect from summary/experience
-        let effectiveLanguage = (language as string) || 'en';
+        let effectiveLanguage = language || 'en';
         if (!req.body.language) {
             try {
-                const basis = (validatedData.summary || '') || (validatedData.workExperience?.[0]?.description || '');
+                const basis = (validatedData.summary || '') || (((_e = (_d = validatedData.workExperience) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.description) || '');
                 if (basis) {
-                    const detected = await detectLanguage(basis);
-                    if (detected?.code) effectiveLanguage = detected.code;
+                    const detected = await (0, language_1.detectLanguage)(basis);
+                    if (detected === null || detected === void 0 ? void 0 : detected.code)
+                        effectiveLanguage = detected.code;
                 }
-            } catch {}
+            }
+            catch (_g) { }
         }
-        const html = generateHTMLResume(htmlResumeData, template as string, effectiveLanguage);
-
+        const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
         const executablePath = await resolveChromeExecutablePath(puppeteer);
-        const launchOptions: any = {
+        const launchOptions = {
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         };
-        if (executablePath) launchOptions.executablePath = executablePath;
+        if (executablePath)
+            launchOptions.executablePath = executablePath;
         const browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
-        
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
-        
         // Generate PDF
         const pdf = await page.pdf({
             format: 'A4',
@@ -1593,46 +1401,41 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
                 left: '20mm'
             }
         });
-
         await browser.close();
-
         // Return PDF
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
         res.setHeader('Content-Length', Buffer.byteLength(pdf).toString());
         res.end(pdf);
-
-    } catch (error) {
-        if (error instanceof z.ZodError) {
-            handleValidationError(error, res);
-        } else {
-            handleDatabaseError(error, res, 'generate HTML PDF');
+    }
+    catch (error) {
+        if (error instanceof zod_1.z.ZodError) {
+            (0, errorHandling_1.handleValidationError)(error, res);
+        }
+        else {
+            (0, errorHandling_1.handleDatabaseError)(error, res, 'generate HTML PDF');
         }
     }
 }));
-
 // POST /api/resumes/:id/html-pdf - Convert existing resume to PDF using HTML template
-router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b, _c, _d, _e, _f;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'colorful', language = 'en' } = req.body;
-
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
         if (isNaN(resumeId)) {
             return res.status(400).json({ error: 'Invalid resume ID' });
         }
-
-        const resume = await getResumeById(resumeId, userId);
+        const resume = await (0, resumeService_1.getResumeById)(resumeId, userId);
         if (!resume) {
-            handleNotFound(res, 'Resume');
+            (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
-
         // Convert resume data to HTML format
         const resumeData = {
             fullName: resume.fullName,
@@ -1642,7 +1445,7 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             linkedIn: resume.linkedIn || undefined,
             website: resume.website || undefined,
             summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 startDate: exp.startDate,
@@ -1650,53 +1453,52 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 description: (() => {
                     return exp.description;
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
                 techStack: exp.techStack,
             }))),
-            education: resume.educations?.map((edu: any) => ({
+            education: ((_b = resume.educations) === null || _b === void 0 ? void 0 : _b.map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            }))) || [],
+            skills: ((_c = resume.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
             languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            certifications: ((_d = resume.certifications) === null || _d === void 0 ? void 0 : _d.map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            })) || [],
+            }))) || [],
         };
-
         // Generate HTML
         // Determine effective language: prefer provided, else detect from saved content
-        let effectiveLanguage = (language as string) || 'en';
+        let effectiveLanguage = language || 'en';
         if (!req.body.language) {
             try {
-                const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
+                const basis = (resume.summary || '') || (((_f = (_e = resume.workExperiences) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.description) || '');
                 if (basis) {
-                    const detected = await detectLanguage(basis);
-                    if (detected?.code) effectiveLanguage = detected.code;
+                    const detected = await (0, language_1.detectLanguage)(basis);
+                    if (detected === null || detected === void 0 ? void 0 : detected.code)
+                        effectiveLanguage = detected.code;
                 }
-            } catch {}
+            }
+            catch (_g) { }
         }
-        const html = generateHTMLResume(resumeData, template as string, effectiveLanguage);
-
+        const html = (0, htmlResumeService_1.generateHTMLResume)(resumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
         const executablePath = await resolveChromeExecutablePath(puppeteer);
-        const launchOptions2: any = {
+        const launchOptions2 = {
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         };
-        if (executablePath) launchOptions2.executablePath = executablePath;
+        if (executablePath)
+            launchOptions2.executablePath = executablePath;
         const browser = await puppeteer.launch(launchOptions2);
         const page = await browser.newPage();
-        
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
-        
         // Generate PDF
         const pdf = await page.pdf({
             format: 'A4',
@@ -1708,33 +1510,30 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 left: '20mm'
             }
         });
-
         await browser.close();
-
         // Return PDF
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', 'attachment; filename="resume.pdf"');
         res.setHeader('Content-Length', Buffer.byteLength(pdf).toString());
         res.end(pdf);
-
-    } catch (error: any) {
+    }
+    catch (error) {
         console.error('Error in HTML PDF endpoint:', error);
         res.status(500).json({ error: 'Failed to generate HTML PDF' });
     }
 }));
-
 // POST /api/resumes/upload
-router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(async (req: any, res) => {
+router.post('/upload', auth_1.ensureAuthenticated, upload.single('file'), (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
-
         // Step 1: Upload file to OpenAI
         const formData = new (require('form-data'))();
         formData.append('file', req.file.buffer, {
@@ -1742,26 +1541,20 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             contentType: req.file.mimetype,
         });
         formData.append('purpose', 'assistants');
-
         const openaiApiKey = process.env.OPENAI_API_KEY;
         const openaiAssistantId = process.env.OPENAI_ASSISTANT_ID;
         if (!openaiApiKey || !openaiAssistantId) {
             return res.status(500).json({ error: 'OpenAI API key or Assistant ID not configured' });
         }
-
         // Upload file
-        const uploadResponse = await axios.post('https://api.openai.com/v1/files', formData, {
-            headers: {
-                ...formData.getHeaders(),
-                'Authorization': `Bearer ${openaiApiKey}`,
-            },
+        const uploadResponse = await axios_1.default.post('https://api.openai.com/v1/files', formData, {
+            headers: Object.assign(Object.assign({}, formData.getHeaders()), { 'Authorization': `Bearer ${openaiApiKey}` }),
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
         });
         const fileId = uploadResponse.data.id;
-
         // Step 2: Create a new thread
-        const threadResponse = await axios.post('https://api.openai.com/v1/threads', {}, {
+        const threadResponse = await axios_1.default.post('https://api.openai.com/v1/threads', {}, {
             headers: {
                 'Authorization': `Bearer ${openaiApiKey}`,
                 'OpenAI-Beta': 'assistants=v2',
@@ -1769,9 +1562,8 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             },
         });
         const threadId = threadResponse.data.id;
-
         // Step 3: Add a message to the thread with the file attachment
-        const messageResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+        const messageResponse = await axios_1.default.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
             role: 'user',
             content: 'Please extract the information from this resume and return it in the specified JSON format.',
             attachments: [
@@ -1787,9 +1579,8 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
                 'Content-Type': 'application/json',
             },
         });
-
         // Step 4: Run the assistant
-        const runResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+        const runResponse = await axios_1.default.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
             assistant_id: openaiAssistantId,
         }, {
             headers: {
@@ -1799,21 +1590,17 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             },
         });
         const runId = runResponse.data.id;
-
         // Step 5: Poll for completion
         let runStatus = 'in_progress';
         let pollAttempts = 0;
         const maxPollAttempts = 30; // 5 minutes max
-
         while (runStatus === 'in_progress' || runStatus === 'queued') {
             await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
             pollAttempts++;
-
             if (pollAttempts > maxPollAttempts) {
                 return res.status(408).json({ error: 'Processing timeout' });
             }
-
-            const statusResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+            const statusResponse = await axios_1.default.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
                 headers: {
                     'Authorization': `Bearer ${openaiApiKey}`,
                     'OpenAI-Beta': 'assistants=v2',
@@ -1821,56 +1608,52 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             });
             runStatus = statusResponse.data.status;
         }
-
         if (runStatus !== 'completed') {
             return res.status(500).json({ error: `Processing failed with status: ${runStatus}` });
         }
-
         // Step 6: Retrieve the messages
-        const messagesResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+        const messagesResponse = await axios_1.default.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
             headers: {
                 'Authorization': `Bearer ${openaiApiKey}`,
                 'OpenAI-Beta': 'assistants=v2',
             },
         });
-
         const messages = messagesResponse.data.data;
-        const assistantMessage = messages.find((msg: any) => msg.role === 'assistant');
-
+        const assistantMessage = messages.find((msg) => msg.role === 'assistant');
         if (!assistantMessage || !assistantMessage.content || !assistantMessage.content[0]) {
             return res.status(500).json({ error: 'No response from assistant' });
         }
-
         const extractedText = assistantMessage.content[0].text.value;
-
         // Parse the JSON response
         let parsedData;
         try {
             const jsonMatch = extractedText.match(/```json\n([\s\S]*?)\n```/) || extractedText.match(/```\n([\s\S]*?)\n```/) || extractedText.match(/({[\s\S]*})/);
             if (jsonMatch) {
                 parsedData = JSON.parse(jsonMatch[1]);
-            } else {
+            }
+            else {
                 parsedData = JSON.parse(extractedText);
             }
-        } catch (parseError) {
+        }
+        catch (parseError) {
             console.error('JSON parse error:', parseError);
             console.log('Extracted text:', extractedText);
             return res.status(500).json({ error: 'Failed to parse extracted data' });
         }
-
         // Clean up: Delete the uploaded file
         try {
-            await axios.delete(`https://api.openai.com/v1/files/${fileId}`, {
+            await axios_1.default.delete(`https://api.openai.com/v1/files/${fileId}`, {
                 headers: {
                     'Authorization': `Bearer ${openaiApiKey}`,
                 },
             });
-        } catch (deleteError) {
+        }
+        catch (deleteError) {
             console.warn('Failed to delete uploaded file:', deleteError);
         }
-
         res.json(parsedData);
-    } catch (error: any) {
+    }
+    catch (error) {
         console.error('Error in upload endpoint:', error);
         if (error.response) {
             console.error('Response data:', error.response.data);
@@ -1879,18 +1662,16 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
         res.status(500).json({ error: 'Failed to process resume' });
     }
 }));
-
 // GET /api/resumes/subscription-status - Check user's subscription status and available features
-router.get('/subscription-status', ensureAuthenticated, withPremiumFeatures, asyncHandler(async (req: any, res) => {
+router.get('/subscription-status', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
+    var _a, _b;
     try {
-        const userId = req.user?.sub;
+        const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
-            handleUnauthorized(res);
+            (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-
-        const isPremium = req.user?.isPremium || false;
-
+        const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         res.json({
             isPremium,
             availableFeatures: {
@@ -1902,67 +1683,15 @@ router.get('/subscription-status', ensureAuthenticated, withPremiumFeatures, asy
             },
             templates: isPremium ? ['modern', 'classic', 'minimal'] : ['modern']
         });
-    } catch (error) {
-        handleDatabaseError(error, res, 'check subscription status');
+    }
+    catch (error) {
+        (0, errorHandling_1.handleDatabaseError)(error, res, 'check subscription status');
     }
 }));
-
-function tryParseJsonObject(content: string): Record<string, any> | null {
-    if (!content || typeof content !== 'string') return null;
-    const raw = content.trim();
-    try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-    } catch {}
-
-    const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
-    if (fenced?.[1]) {
-        try {
-            const parsed = JSON.parse(fenced[1]);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-        } catch {}
-    }
-
-    const objMatch = raw.match(/(\{[\s\S]*\})/);
-    if (objMatch?.[1]) {
-        try {
-            const parsed = JSON.parse(objMatch[1]);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-        } catch {}
-    }
-    return null;
-}
-
-function tryParseJsonStringArray(content: string): string[] | null {
-    if (!content || typeof content !== 'string') return null;
-    const raw = content.trim();
-    try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === 'string');
-        if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).skills)) {
-            return (parsed as any).skills.filter((v: any) => typeof v === 'string');
-        }
-    } catch {}
-
-    const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
-    if (fenced?.[1]) {
-        return tryParseJsonStringArray(fenced[1]);
-    }
-
-    const arrMatch = raw.match(/(\[[\s\S]*\])/);
-    if (arrMatch?.[1]) {
-        try {
-            const parsed = JSON.parse(arrMatch[1]);
-            if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === 'string');
-        } catch {}
-    }
-    return null;
-}
-
 // Function to extract and match skills from job description
-async function extractAndMatchSkills(jobDescription: string, resumeSkills: any[], language: string = 'en') {
-    const languageConfig = getLanguageConfig(language);
-    
+async function extractAndMatchSkills(jobDescription, resumeSkills, language = 'en') {
+    var _a, _b, _c, _d, _e, _f;
+    const languageConfig = (0, language_1.getLanguageConfig)(language);
     // Extract keywords/skills from job description using OpenAI
     const extractionPrompt = `Analyze the following job description and extract the most important technical skills, tools, technologies, and keywords that would be relevant for this position. Focus on:
 1. Programming languages, frameworks, and technologies
@@ -1971,128 +1700,107 @@ async function extractAndMatchSkills(jobDescription: string, resumeSkills: any[]
 4. Industry-specific skills
 5. Soft skills that are explicitly mentioned
 
-Return ONLY valid JSON as an object in this exact shape:
-{"skills": ["..."]}
+Return only the skills as a JSON array of strings, without any additional text or formatting.
 
 Job Description:
 ${jobDescription}`;
-
     try {
-        const response = await openai.chat.completions.create({
+        const response = await openai_1.openai.chat.completions.create({
             model: 'gpt-5.2',
             messages: [
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: extractionPrompt },
             ],
-            response_format: { type: 'json_object' },
             temperature: 0.3,
             max_completion_tokens: 1000,
         });
-
-        const content = response.choices[0]?.message?.content?.trim();
+        const content = (_c = (_b = (_a = response.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c.trim();
         if (!content) {
             return [];
         }
-
-        const extractedSkills = tryParseJsonStringArray(content);
-        if (!extractedSkills) {
-            console.warn('Failed to parse extracted skills: model did not return a valid JSON array of strings');
+        let extractedSkills = [];
+        try {
+            extractedSkills = JSON.parse(content);
+        }
+        catch (parseError) {
+            console.warn('Failed to parse extracted skills:', parseError);
             return [];
         }
-
         // Get all existing skills from database
-        const allSkills = await prisma.skill.findMany({
+        const allSkills = await database_1.prisma.skill.findMany({
             select: { id: true, name: true }
         });
-
         // Get current resume skills
         const currentResumeSkills = resumeSkills.map(skill => skill.name.toLowerCase());
-
         // Match extracted skills with existing skills
-        const matchedSkills: any[] = [];
-        const newSkills: string[] = [];
-
+        const matchedSkills = [];
+        const newSkills = [];
         for (const extractedSkill of extractedSkills) {
             if (!extractedSkill || typeof extractedSkill !== 'string') {
                 continue;
             }
-            
             const normalizedSkill = extractedSkill.toLowerCase().trim();
-            
             if (normalizedSkill.length === 0) {
                 continue;
             }
-            
             // Check if skill exists in database
-            const existingSkill = allSkills.find(skill => 
-                skill.name.toLowerCase() === normalizedSkill
-            );
-
+            const existingSkill = allSkills.find(skill => skill.name.toLowerCase() === normalizedSkill);
             if (existingSkill) {
                 matchedSkills.push(existingSkill);
-            } else {
+            }
+            else {
                 // Check if it's already in current resume
                 if (currentResumeSkills.includes(normalizedSkill)) {
                     // Find the original skill object from resume
-                    const resumeSkill = resumeSkills.find(skill => 
-                        skill.name.toLowerCase() === normalizedSkill
-                    );
+                    const resumeSkill = resumeSkills.find(skill => skill.name.toLowerCase() === normalizedSkill);
                     if (resumeSkill) {
                         matchedSkills.push(resumeSkill);
                     }
-                } else {
+                }
+                else {
                     newSkills.push(extractedSkill);
                 }
             }
         }
-        
         console.log(`Matched ${matchedSkills.length} existing skills, found ${newSkills.length} new skills`);
-
         // Add some relevant skills that might be missing but are commonly valuable
         const additionalSkillsPrompt = `Based on the job description, suggest 3-5 additional relevant skills that would be valuable for this position but might not be explicitly mentioned. These should be complementary skills that would make a candidate more competitive.
 
-Return ONLY valid JSON as an object in this exact shape:
-{"skills": ["..."]}
+Return only the skills as a JSON array of strings.
 
 Job Description:
 ${jobDescription}`;
-
-        const additionalResponse = await openai.chat.completions.create({
+        const additionalResponse = await openai_1.openai.chat.completions.create({
             model: 'gpt-5.2',
             messages: [
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: additionalSkillsPrompt },
             ],
-            response_format: { type: 'json_object' },
             temperature: 0.5,
             max_completion_tokens: 500,
         });
-
-        const additionalContent = additionalResponse.choices[0]?.message?.content?.trim();
+        const additionalContent = (_f = (_e = (_d = additionalResponse.choices[0]) === null || _d === void 0 ? void 0 : _d.message) === null || _e === void 0 ? void 0 : _e.content) === null || _f === void 0 ? void 0 : _f.trim();
         if (additionalContent) {
-            const additionalSkills = tryParseJsonStringArray(additionalContent);
-            if (additionalSkills) {
+            try {
+                const additionalSkills = JSON.parse(additionalContent);
                 newSkills.push(...additionalSkills);
-            } else {
-                console.warn('Failed to parse additional skills: model did not return a valid JSON array of strings');
+            }
+            catch (parseError) {
+                console.warn('Failed to parse additional skills:', parseError);
             }
         }
-
         // Process new skills and add them to matched skills
         if (newSkills.length > 0) {
-            const processedNewSkills = await processSkills(
-                newSkills.map(name => ({ name }))
-            );
+            const processedNewSkills = await (0, resumeService_1.processSkills)(newSkills.map(name => ({ name })));
             matchedSkills.push(...processedNewSkills);
         }
-
         return matchedSkills;
-    } catch (error) {
+    }
+    catch (error) {
         console.error('Error extracting skills from job description:', error);
         // Fallback: return original resume skills if extraction fails
         console.log('Using fallback: returning original resume skills');
         return resumeSkills;
     }
 }
-
-export default router;
+exports.default = router;
