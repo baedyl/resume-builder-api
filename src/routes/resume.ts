@@ -44,13 +44,29 @@ const router = express.Router();
 const JOB_TITLE_PRESERVE_TERMS = ['Data'];
 
 async function resolveChromeExecutablePath(puppeteer: any): Promise<string | undefined> {
+    const fs = require('fs');
+    
+    // 1. Try explicit environment variable first
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
-        const fs = require('fs');
-        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) return process.env.PUPPETEER_EXECUTABLE_PATH;
+        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+            console.log(`Using PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
+            return process.env.PUPPETEER_EXECUTABLE_PATH;
+        }
     }
-    // Try common Render cache locations for @puppeteer/browsers
+
+    // 2. Try Puppeteer's default resolution
     try {
-        const fs = require('fs');
+        const path = puppeteer.executablePath();
+        if (path && fs.existsSync(path)) {
+            console.log(`Using puppeteer.executablePath(): ${path}`);
+            return path;
+        }
+    } catch (e) {
+        console.warn('puppeteer.executablePath() failed:', e);
+    }
+
+    // 3. Fallback: Try common Render/cloud cache locations
+    try {
         const path = require('path');
         const candidateCacheRoots = [
             process.env.PUPPETEER_CACHE_DIR,
@@ -59,28 +75,40 @@ async function resolveChromeExecutablePath(puppeteer: any): Promise<string | und
             process.env.HOME ? `${process.env.HOME}/.cache/puppeteer` : undefined,
             '/root/.cache/puppeteer'
         ].filter(Boolean) as string[];
+
+        console.log('Searching for Chrome in cache roots:', candidateCacheRoots);
+
         for (const cacheDir of candidateCacheRoots) {
             if (!fs.existsSync(cacheDir)) continue;
+            
+            // Check for 'chrome' directory (newer puppeteer versions)
             const chromeRoot = path.join(cacheDir, 'chrome');
-            if (!fs.existsSync(chromeRoot)) continue;
-            const versions = fs.readdirSync(chromeRoot).sort();
-            for (let i = versions.length - 1; i >= 0; i--) {
-                const verDir = path.join(chromeRoot, versions[i]);
-                const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
-                if (fs.existsSync(linux64)) return linux64;
-                const linux = path.join(verDir, 'chrome-linux', 'chrome');
-                if (fs.existsSync(linux)) return linux;
+            if (fs.existsSync(chromeRoot)) {
+                const versions = fs.readdirSync(chromeRoot).sort();
+                for (let i = versions.length - 1; i >= 0; i--) {
+                    const verDir = path.join(chromeRoot, versions[i]);
+                    // Check various common binary paths
+                    const candidates = [
+                        path.join(verDir, 'chrome-linux64', 'chrome'),
+                        path.join(verDir, 'chrome-linux', 'chrome'),
+                        path.join(verDir, 'chrome'),
+                    ];
+                    
+                    for (const candidate of candidates) {
+                        if (fs.existsSync(candidate)) {
+                            console.log(`Found Chrome in cache: ${candidate}`);
+                            return candidate;
+                        }
+                    }
+                }
             }
         }
-    } catch (_) { /* ignore */ }
-    try {
-        const path = await puppeteer.executablePath();
-        const fs = require('fs');
-        if (path && fs.existsSync(path)) return path;
-        return undefined;
-    } catch (_) {
-        return undefined;
+    } catch (e) {
+        console.warn('Manual cache search failed:', e);
     }
+    
+    console.warn('Could not resolve Chrome executable path');
+    return undefined;
 }
 
 // Helper to send PDFKit documents reliably by buffering and setting Content-Length
@@ -1669,9 +1697,18 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         const executablePath = await resolveChromeExecutablePath(puppeteer);
         const launchOptions: any = {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--font-render-hinting=none'
+            ]
         };
         if (executablePath) launchOptions.executablePath = executablePath;
+        
+        console.log('Launching Puppeteer with options:', JSON.stringify({ ...launchOptions, executablePath: 'REDACTED' }));
+        
         const browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
         
@@ -1699,6 +1736,7 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         res.end(pdf);
 
     } catch (error) {
+        console.error('PDF Generation Error:', error);
         if (error instanceof z.ZodError) {
             handleValidationError(error, res);
         } else {
@@ -1792,9 +1830,18 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const executablePath = await resolveChromeExecutablePath(puppeteer);
         const launchOptions2: any = {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--font-render-hinting=none'
+            ]
         };
         if (executablePath) launchOptions2.executablePath = executablePath;
+        
+        console.log('Launching Puppeteer (HTML-PDF) with options:', JSON.stringify({ ...launchOptions2, executablePath: 'REDACTED' }));
+
         const browser = await puppeteer.launch(launchOptions2);
         const page = await browser.newPage();
         
@@ -1823,7 +1870,11 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
 
     } catch (error: any) {
         console.error('Error in HTML PDF endpoint:', error);
-        res.status(500).json({ error: 'Failed to generate HTML PDF' });
+        // Include error message in response for better debugging in prod
+        res.status(500).json({
+            error: 'Failed to generate HTML PDF',
+            details: error instanceof Error ? error.message : String(error)
+        });
     }
 }));
 
