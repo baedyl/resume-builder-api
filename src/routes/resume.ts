@@ -70,6 +70,7 @@ async function resolveChromeExecutablePath(puppeteer: any): Promise<string | und
         const path = require('path');
         const candidateCacheRoots = [
             process.env.PUPPETEER_CACHE_DIR,
+            path.join(process.cwd(), '.cache', 'puppeteer'),
             '/opt/render/.cache/puppeteer',
             '/opt/render/project/.cache/puppeteer',
             process.env.HOME ? `${process.env.HOME}/.cache/puppeteer` : undefined,
