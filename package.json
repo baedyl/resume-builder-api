@@ -9,7 +9,7 @@
     "build": "prisma generate && tsc && cp -r src/templates dist/",
     "start": "node dist/index.js",
     "seed": "ts-node src/seed.ts",
-    "postinstall": "puppeteer browsers install chrome"
+    "postinstall": "npx puppeteer browsers install chrome --path .cache/puppeteer"
   },
   "keywords": [],
   "author": "",
