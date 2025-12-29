@@ -5,6 +5,7 @@ exports.enhanceWithOpenAI = enhanceWithOpenAI;
 exports.translateText = translateText;
 const openai_1 = require("../lib/openai");
 const language_1 = require("./language");
+const preserveTerms_1 = require("./preserveTerms");
 async function callOpenAIWithRetry(prompt, systemMessage = 'You are a helpful assistant.', options = {}) {
     var _a, _b, _c;
     const { model = 'gpt-5.2', temperature = 0.7, maxTokens = 500, maxRetries = 2 } = options;
@@ -48,24 +49,32 @@ async function enhanceWithOpenAI(prompt, systemMessage = 'You are a helpful assi
  * Translate a given text to the target language using OpenAI.
  * Keeps technical terms and proper nouns when appropriate.
  */
-async function translateText(text, targetLanguageCode) {
+async function translateText(text, targetLanguageCode, options = {}) {
+    var _a, _b;
     if (!text || text.trim().length === 0)
         return text;
+    const preserveTerms = (options.preserveTerms || []).filter((t) => typeof t === 'string' && t.trim().length > 0);
+    const protection = preserveTerms.length > 0 ? (0, preserveTerms_1.protectPreservedTerms)(text, preserveTerms) : null;
+    const textForModel = (_a = protection === null || protection === void 0 ? void 0 : protection.protectedText) !== null && _a !== void 0 ? _a : text;
     const languageInfo = (0, language_1.getLanguageInfo)(targetLanguageCode);
     const targetName = languageInfo.name || 'French';
     const systemMessage = 'You are a professional translator. Return only the translated text.';
-    const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.
+    const tokenInstruction = ((_b = protection === null || protection === void 0 ? void 0 : protection.tokens) === null || _b === void 0 ? void 0 : _b.length)
+        ? `\nDo not translate, remove, or modify these tokens: ${protection.tokens.join(', ')}. Keep them exactly as-is (including underscores).\n`
+        : '\n';
+    const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.${tokenInstruction}
 
 Text:
-${text}`;
+${textForModel}`;
     try {
         const result = await callOpenAIWithRetry(prompt, systemMessage, {
             model: 'gpt-5.2',
             temperature: 0.2,
-            maxTokens: Math.min(Math.max(text.length * 2, 200), 1200),
+            maxTokens: Math.min(Math.max(textForModel.length * 2, 200), 1200),
             maxRetries: 2,
         });
-        return (result || text).trim();
+        const translated = (result || text).trim();
+        return (protection ? protection.restore(translated) : translated).trim();
     }
     catch (e) {
         return text;

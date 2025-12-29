@@ -32,6 +32,8 @@ const resumeService_1 = require("../services/resumeService");
 const htmlResumeService_1 = require("../services/htmlResumeService");
 const subscription_1 = require("../middleware/subscription");
 const router = express_1.default.Router();
+// Preserve these tokens/terms in job titles when translating (e.g., "Senior Data Consultant" -> "Consultant Senior Data").
+const JOB_TITLE_PRESERVE_TERMS = ['Data'];
 async function resolveChromeExecutablePath(puppeteer) {
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
         const fs = require('fs');
@@ -154,10 +156,18 @@ async function translateResumeContent(data, targetLanguage) {
             return text !== null && text !== void 0 ? text : undefined;
         return await (0, openai_2.translateText)(trimmed, normalizedTarget);
     };
+    const translateJobTitleField = async (text) => {
+        if (text === null || typeof text === 'undefined')
+            return text !== null && text !== void 0 ? text : undefined;
+        const trimmed = text.toString().trim();
+        if (trimmed.length === 0)
+            return text !== null && text !== void 0 ? text : undefined;
+        return await (0, openai_2.translateText)(trimmed, normalizedTarget, { preserveTerms: JOB_TITLE_PRESERVE_TERMS });
+    };
     const translatedSummary = await translateField(data.summary);
     const translatedWorkExperience = await Promise.all((data.workExperience || []).map(async (exp) => {
         var _a, _b, _c, _d;
-        return (Object.assign(Object.assign({}, exp), { jobTitle: (_a = (await translateField(exp.jobTitle))) !== null && _a !== void 0 ? _a : exp.jobTitle, company: exp.company, location: (_b = (await translateField(exp.location))) !== null && _b !== void 0 ? _b : exp.location, description: (_c = (await translateField(exp.description))) !== null && _c !== void 0 ? _c : exp.description, companyDescription: (_d = (await translateField(exp.companyDescription))) !== null && _d !== void 0 ? _d : exp.companyDescription }));
+        return (Object.assign(Object.assign({}, exp), { jobTitle: (_a = (await translateJobTitleField(exp.jobTitle))) !== null && _a !== void 0 ? _a : exp.jobTitle, company: exp.company, location: (_b = (await translateField(exp.location))) !== null && _b !== void 0 ? _b : exp.location, description: (_c = (await translateField(exp.description))) !== null && _c !== void 0 ? _c : exp.description, companyDescription: (_d = (await translateField(exp.companyDescription))) !== null && _d !== void 0 ? _d : exp.companyDescription }));
     }));
     const translatedEducation = await Promise.all((data.education || []).map(async (edu) => {
         var _a, _b, _c;
@@ -172,6 +182,44 @@ async function translateResumeContent(data, targetLanguage) {
         return (Object.assign(Object.assign({}, skill), { name: (_a = (await translateField(skill.name))) !== null && _a !== void 0 ? _a : skill.name }));
     }));
     return Object.assign(Object.assign({}, data), { language: normalizedTarget, summary: translatedSummary !== null && translatedSummary !== void 0 ? translatedSummary : undefined, workExperience: translatedWorkExperience, education: translatedEducation, certifications: translatedCertifications, skills: translatedSkills });
+}
+function mapDbResumeToSchemaInput(resume, language) {
+    return {
+        fullName: resume.fullName,
+        email: resume.email,
+        phone: resume.phone || undefined,
+        address: resume.address || undefined,
+        linkedIn: resume.linkedIn || undefined,
+        website: resume.website || undefined,
+        summary: resume.summary || undefined,
+        skills: (resume.skills || []).map((s) => ({ name: s.name })),
+        workExperience: (resume.workExperiences || []).map((exp) => ({
+            jobTitle: exp.jobTitle,
+            company: exp.company,
+            location: exp.location,
+            startDate: exp.startDate,
+            endDate: exp.endDate,
+            description: exp.description,
+            companyDescription: exp.companyDescription,
+            techStack: exp.techStack,
+        })),
+        education: (resume.educations || []).map((edu) => ({
+            degree: edu.degree,
+            major: edu.major,
+            institution: edu.institution,
+            startYear: edu.startYear,
+            graduationYear: edu.graduationYear,
+            gpa: edu.gpa,
+            description: edu.description,
+        })),
+        certifications: (resume.certifications || []).map((cert) => ({
+            name: cert.name,
+            issuer: cert.issuer,
+            issueDate: cert.issueDate,
+        })),
+        languages: resume.languages || [],
+        language,
+    };
 }
 // Looser education schema for updates to allow optional/empty startYear values
 const EducationSchemaUpdate = validation_1.EducationSchema.extend({
@@ -324,18 +372,14 @@ router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
             return;
         }
         const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
-        // Ensure skills are properly formatted for PDF template
-        const pdfData = Object.assign(Object.assign({}, validatedData), { skills: ((_c = validatedData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
-                jobTitle: exp.jobTitle,
-                company: exp.company,
-                location: exp.location,
-                startDate: exp.startDate,
-                endDate: exp.endDate,
-                description: (() => {
+        // Clean descriptions first (before translation) to avoid translating duplicated companyDescription text
+        const preparedData = Object.assign(Object.assign({}, validatedData), { workExperience: (validatedData.workExperience || []).map((exp) => (Object.assign(Object.assign({}, exp), { description: (() => {
                     const cd = (exp.companyDescription || '').toString().trim();
                     if (!cd)
                         return exp.description;
@@ -350,13 +394,25 @@ router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
                     catch (_) {
                         return exp.description;
                     }
-                })(),
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                })() }))) });
+        // Translate content when user explicitly requests a resume language
+        const outputData = languageProvided
+            ? await translateResumeContent(preparedData, normalizedLanguage)
+            : preparedData;
+        // Ensure skills are properly formatted for PDF template
+        const pdfData = Object.assign(Object.assign({}, outputData), { skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: (outputData.workExperience || []).map((exp) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))) });
+            })) });
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
         sendPdfDocument(res, doc, 'resume.pdf');
     }
     catch (error) {
@@ -456,7 +512,9 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
             return;
         }
         const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
         const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
                 var _a;
                 return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
@@ -464,22 +522,23 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
+        const outputData = languageProvided
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : validatedData;
         // Ensure skills are properly formatted for PDF template
-        const pdfData = Object.assign(Object.assign({}, validatedData), { skills: ((_c = validatedData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
+        const pdfData = Object.assign(Object.assign({}, outputData), { skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))) });
+            })) });
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
         sendPdfDocument(res, doc, 'resume.pdf');
     }
     catch (error) {
@@ -493,11 +552,13 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
 }));
 // GET /api/resumes/:id/download - Download saved resume as PDF (free users allowed)
 router.get('/:id/download', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language = 'en' } = req.query;
+        const languageProvided = typeof req.query.language === 'string' && req.query.language.trim().length > 0;
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(languageProvided ? req.query.language : undefined);
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
@@ -513,44 +574,47 @@ router.get('/:id/download', auth_1.ensureAuthenticated, subscription_1.withPremi
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
         // Build data in the shape expected by templates
         const pdfData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))),
-            education: ((_c = resume.educations) === null || _c === void 0 ? void 0 : _c.map((edu) => ({
+            })),
+            education: (outputData.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            }))) || [],
-            skills: ((_d = resume.skills) === null || _d === void 0 ? void 0 : _d.map((skill) => ({ name: skill.name }))) || [],
-            languages: resume.languages || [],
-            certifications: ((_e = resume.certifications) === null || _e === void 0 ? void 0 : _e.map((cert) => ({
+            })) || [],
+            skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            }))) || [],
+            })) || [],
         };
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, (normalizedLanguage || language));
         sendPdfDocument(res, doc, 'resume.pdf');
     }
     catch (error) {
@@ -707,7 +771,7 @@ router.put('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(
                     validatedData.summary = await (0, openai_2.translateText)(validatedData.summary, targetLanguage);
                 }
                 if (validatedData.workExperience && validatedData.workExperience.length > 0) {
-                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => (Object.assign(Object.assign({}, exp), { jobTitle: exp.jobTitle ? await (0, openai_2.translateText)(exp.jobTitle, targetLanguage) : exp.jobTitle, company: exp.company, location: exp.location ? await (0, openai_2.translateText)(exp.location, targetLanguage) : exp.location, description: exp.description ? await (0, openai_2.translateText)(exp.description, targetLanguage) : exp.description }))));
+                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => (Object.assign(Object.assign({}, exp), { jobTitle: exp.jobTitle ? await (0, openai_2.translateText)(exp.jobTitle, targetLanguage, { preserveTerms: JOB_TITLE_PRESERVE_TERMS }) : exp.jobTitle, company: exp.company, location: exp.location ? await (0, openai_2.translateText)(exp.location, targetLanguage) : exp.location, description: exp.description ? await (0, openai_2.translateText)(exp.description, targetLanguage) : exp.description }))));
                 }
                 if (validatedData.education && validatedData.education.length > 0) {
                     validatedData.education = await Promise.all(validatedData.education.map(async (edu) => (Object.assign(Object.assign({}, edu), { degree: edu.degree ? await (0, openai_2.translateText)(edu.degree, targetLanguage) : edu.degree, major: edu.major ? await (0, openai_2.translateText)(edu.major, targetLanguage) : edu.major, institution: edu.institution, description: edu.description ? await (0, openai_2.translateText)(edu.description, targetLanguage) : edu.description }))));
@@ -936,11 +1000,13 @@ router.get('/dashboard/stats', auth_1.ensureAuthenticated, (0, asyncHandler_1.as
 }));
 // POST /api/resumes/:id/pdf
 router.post('/:id/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language: reqLanguage } = req.body;
+        const languageProvided = typeof reqLanguage === 'string' && reqLanguage.trim().length > 0;
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(languageProvided ? reqLanguage : undefined);
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
@@ -956,47 +1022,50 @@ router.post('/:id/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
         // Convert resume data to PDF format
         const pdfData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, reqLanguage) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))) || [],
-            education: ((_c = resume.educations) === null || _c === void 0 ? void 0 : _c.map((edu) => ({
+            })) || [],
+            education: (outputData.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            }))) || [],
-            skills: ((_d = resume.skills) === null || _d === void 0 ? void 0 : _d.map((skill) => ({ name: skill.name }))) || [],
-            languages: resume.languages || [],
-            certifications: ((_e = resume.certifications) === null || _e === void 0 ? void 0 : _e.map((cert) => ({
+            })) || [],
+            skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            }))) || [],
+            })) || [],
         };
         // Generate PDF using template
         // Determine language: use provided or detect from content
-        let effectiveLanguage = reqLanguage || 'en';
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
         try {
-            if (!reqLanguage) {
-                const basis = resume.summary || ((_g = (_f = resume.workExperiences) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.description) || '';
+            if (!languageProvided) {
+                const basis = resume.summary || ((_e = (_d = resume.workExperiences) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.description) || '';
                 if (basis && basis.length > 0) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
@@ -1004,7 +1073,7 @@ router.post('/:id/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
                 }
             }
         }
-        catch (_h) { }
+        catch (_f) { }
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, effectiveLanguage);
         sendPdfDocument(res, doc, 'resume.pdf');
@@ -1154,18 +1223,16 @@ Return the enhanced resume as structured JSON matching this format:
                         { role: 'system', content: languageConfig.systemMessage },
                         { role: 'user', content: prompt },
                     ],
-                    temperature: 0.7,
-                    max_completion_tokens: 2000,
+                    response_format: { type: 'json_object' },
+                    temperature: 0.5,
+                    max_completion_tokens: 2500,
                 });
                 const content = (_g = (_f = (_e = response.choices[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g.trim();
                 if (content) {
-                    try {
-                        enhancedResume = JSON.parse(content);
+                    enhancedResume = tryParseJsonObject(content);
+                    if (enhancedResume)
                         break;
-                    }
-                    catch (parseError) {
-                        console.warn(`JSON parse error on attempt ${attempt}:`, parseError);
-                    }
+                    console.warn(`JSON parse error on attempt ${attempt}: unable to parse model output as JSON object`);
                 }
             }
             catch (apiError) {
@@ -1181,6 +1248,10 @@ Return the enhanced resume as structured JSON matching this format:
         // Save the enhanced resume to the database
         const processedSkills = await (0, resumeService_1.processSkills)(enhancedResume.skills || []);
         const processedLanguages = await (0, resumeService_1.processLanguages)(enhancedResume.languages || []);
+        // Be tolerant to slight key name variations from the model
+        const finalWorkExperience = enhancedResume.workExperience || enhancedResume.workExperiences || [];
+        const finalEducation = enhancedResume.education || enhancedResume.educations || [];
+        const finalCertifications = enhancedResume.certifications || [];
         const savedResume = await database_1.prisma.resume.create({
             data: {
                 userId,
@@ -1194,7 +1265,7 @@ Return the enhanced resume as structured JSON matching this format:
                 skills: { connect: processedSkills.map((skill) => ({ id: skill.id })) },
                 languages: { connect: processedLanguages.map((lang) => ({ id: lang.id })) },
                 workExperiences: {
-                    create: (enhancedResume.workExperience || []).map((exp) => ({
+                    create: (finalWorkExperience || []).map((exp) => ({
                         jobTitle: exp.jobTitle,
                         company: exp.company,
                         location: exp.location,
@@ -1206,7 +1277,7 @@ Return the enhanced resume as structured JSON matching this format:
                     })),
                 },
                 educations: {
-                    create: (enhancedResume.education || []).map((edu) => ({
+                    create: (finalEducation || []).map((edu) => ({
                         degree: edu.degree,
                         major: edu.major,
                         institution: edu.institution,
@@ -1217,7 +1288,7 @@ Return the enhanced resume as structured JSON matching this format:
                     })),
                 },
                 certifications: {
-                    create: (enhancedResume.certifications || []).map((cert) => ({
+                    create: (finalCertifications || []).map((cert) => ({
                         name: cert.name,
                         issuer: cert.issuer,
                         issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
@@ -1241,11 +1312,13 @@ Return the enhanced resume as structured JSON matching this format:
 }));
 // POST /api/resumes/:id/html - Get resume as HTML
 router.post('/:id/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'colorful', language = 'en' } = req.query;
+        const languageProvided = typeof req.query.language === 'string' && req.query.language.trim().length > 0;
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(languageProvided ? req.query.language : undefined);
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
@@ -1258,51 +1331,56 @@ router.post('/:id/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHan
             (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
         // Convert resume data to HTML format
         const resumeData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                companyDescription: exp.companyDescription || undefined,
                 techStack: exp.techStack,
-            }))) || [],
-            education: ((_b = resume.educations) === null || _b === void 0 ? void 0 : _b.map((edu) => ({
+            })) || [],
+            education: (outputData.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            }))) || [],
-            skills: ((_c = resume.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
-            languages: resume.languages || [],
-            certifications: ((_d = resume.certifications) === null || _d === void 0 ? void 0 : _d.map((cert) => ({
+            })) || [],
+            skills: ((_b = outputData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            }))) || [],
+            })) || [],
         };
         // Determine effective language for preview: prefer query param, else detect
-        let effectiveLanguage = language || 'en';
-        if (!req.query.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
-                const basis = (resume.summary || '') || (((_f = (_e = resume.workExperiences) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.description) || '');
+                const basis = (resume.summary || '') || (((_d = (_c = resume.workExperiences) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
                 if (basis) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_g) { }
+            catch (_e) { }
         }
         const html = (0, htmlResumeService_1.generateHTMLResume)(resumeData, template, effectiveLanguage);
         res.setHeader('Content-Type', 'text/html');
@@ -1315,66 +1393,72 @@ router.post('/:id/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHan
 }));
 // POST /api/resumes/save-and-html-pdf - Save new resume and return PDF from HTML template
 router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _f = req.body, { template = 'colorful', language = 'en' } = _f, resumeData = __rest(_f, ["template", "language"]);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language }));
+        const _e = req.body, { template = 'colorful', language = 'en' } = _e, resumeData = __rest(_e, ["template", "language"]);
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
         // Save the resume to database first
         const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
                 var _a;
                 return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
             }), userId }));
+        const outputData = languageProvided
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : validatedData;
         // Convert resume data to HTML format
         const htmlResumeData = {
-            fullName: validatedData.fullName,
-            email: validatedData.email,
-            phone: validatedData.phone || undefined,
-            address: validatedData.address || undefined,
-            linkedIn: validatedData.linkedIn || undefined,
-            website: validatedData.website || undefined,
-            summary: validatedData.summary || '',
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                companyDescription: exp.companyDescription || undefined,
                 techStack: exp.techStack,
-            }))),
-            education: validatedData.education.map(edu => ({
+            })),
+            education: (outputData.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: ((_b = validatedData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
-            languages: validatedData.languages || [],
-            certifications: ((_c = validatedData.certifications) === null || _c === void 0 ? void 0 : _c.map((cert) => ({
+            skills: ((_b = outputData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            }))) || [],
+            })) || [],
         };
         // Generate HTML
         // Determine effective language: prefer provided, else detect from summary/experience
-        let effectiveLanguage = language || 'en';
-        if (!req.body.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
-                const basis = (validatedData.summary || '') || (((_e = (_d = validatedData.workExperience) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.description) || '');
+                const basis = (validatedData.summary || '') || (((_d = (_c = validatedData.workExperience) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
                 if (basis) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_g) { }
+            catch (_f) { }
         }
         const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
@@ -1419,11 +1503,15 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
 }));
 // POST /api/resumes/:id/html-pdf - Convert existing resume to PDF using HTML template
 router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'colorful', language = 'en' } = req.body;
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language')
+            && typeof req.body.language === 'string'
+            && req.body.language.trim().length > 0;
+        const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
@@ -1436,54 +1524,57 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
             (0, errorHandling_1.handleNotFound)(res, 'Resume');
             return;
         }
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
         // Convert resume data to HTML format
         const resumeData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await (0, openai_2.translateText)(exp.companyDescription, language) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))),
-            education: ((_b = resume.educations) === null || _b === void 0 ? void 0 : _b.map((edu) => ({
+            })),
+            education: (outputData.education || []).map((edu) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
-            }))) || [],
-            skills: ((_c = resume.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
-            languages: resume.languages || [],
-            certifications: ((_d = resume.certifications) === null || _d === void 0 ? void 0 : _d.map((cert) => ({
+            })) || [],
+            skills: ((_b = outputData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
-            }))) || [],
+            })) || [],
         };
         // Generate HTML
         // Determine effective language: prefer provided, else detect from saved content
-        let effectiveLanguage = language || 'en';
-        if (!req.body.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
-                const basis = (resume.summary || '') || (((_f = (_e = resume.workExperiences) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.description) || '');
+                const basis = (resume.summary || '') || (((_d = (_c = resume.workExperiences) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
                 if (basis) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_g) { }
+            catch (_e) { }
         }
         const html = (0, htmlResumeService_1.generateHTMLResume)(resumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
@@ -1688,6 +1779,64 @@ router.get('/subscription-status', auth_1.ensureAuthenticated, subscription_1.wi
         (0, errorHandling_1.handleDatabaseError)(error, res, 'check subscription status');
     }
 }));
+function tryParseJsonObject(content) {
+    if (!content || typeof content !== 'string')
+        return null;
+    const raw = content.trim();
+    try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+            return parsed;
+    }
+    catch (_a) { }
+    const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+    if (fenced === null || fenced === void 0 ? void 0 : fenced[1]) {
+        try {
+            const parsed = JSON.parse(fenced[1]);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+                return parsed;
+        }
+        catch (_b) { }
+    }
+    const objMatch = raw.match(/(\{[\s\S]*\})/);
+    if (objMatch === null || objMatch === void 0 ? void 0 : objMatch[1]) {
+        try {
+            const parsed = JSON.parse(objMatch[1]);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+                return parsed;
+        }
+        catch (_c) { }
+    }
+    return null;
+}
+function tryParseJsonStringArray(content) {
+    if (!content || typeof content !== 'string')
+        return null;
+    const raw = content.trim();
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed))
+            return parsed.filter((v) => typeof v === 'string');
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.skills)) {
+            return parsed.skills.filter((v) => typeof v === 'string');
+        }
+    }
+    catch (_a) { }
+    const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+    if (fenced === null || fenced === void 0 ? void 0 : fenced[1]) {
+        return tryParseJsonStringArray(fenced[1]);
+    }
+    const arrMatch = raw.match(/(\[[\s\S]*\])/);
+    if (arrMatch === null || arrMatch === void 0 ? void 0 : arrMatch[1]) {
+        try {
+            const parsed = JSON.parse(arrMatch[1]);
+            if (Array.isArray(parsed))
+                return parsed.filter((v) => typeof v === 'string');
+        }
+        catch (_b) { }
+    }
+    return null;
+}
 // Function to extract and match skills from job description
 async function extractAndMatchSkills(jobDescription, resumeSkills, language = 'en') {
     var _a, _b, _c, _d, _e, _f;
@@ -1700,7 +1849,8 @@ async function extractAndMatchSkills(jobDescription, resumeSkills, language = 'e
 4. Industry-specific skills
 5. Soft skills that are explicitly mentioned
 
-Return only the skills as a JSON array of strings, without any additional text or formatting.
+Return ONLY valid JSON as an object in this exact shape:
+{"skills": ["..."]}
 
 Job Description:
 ${jobDescription}`;
@@ -1711,6 +1861,7 @@ ${jobDescription}`;
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: extractionPrompt },
             ],
+            response_format: { type: 'json_object' },
             temperature: 0.3,
             max_completion_tokens: 1000,
         });
@@ -1718,12 +1869,9 @@ ${jobDescription}`;
         if (!content) {
             return [];
         }
-        let extractedSkills = [];
-        try {
-            extractedSkills = JSON.parse(content);
-        }
-        catch (parseError) {
-            console.warn('Failed to parse extracted skills:', parseError);
+        const extractedSkills = tryParseJsonStringArray(content);
+        if (!extractedSkills) {
+            console.warn('Failed to parse extracted skills: model did not return a valid JSON array of strings');
             return [];
         }
         // Get all existing skills from database
@@ -1766,7 +1914,8 @@ ${jobDescription}`;
         // Add some relevant skills that might be missing but are commonly valuable
         const additionalSkillsPrompt = `Based on the job description, suggest 3-5 additional relevant skills that would be valuable for this position but might not be explicitly mentioned. These should be complementary skills that would make a candidate more competitive.
 
-Return only the skills as a JSON array of strings.
+Return ONLY valid JSON as an object in this exact shape:
+{"skills": ["..."]}
 
 Job Description:
 ${jobDescription}`;
@@ -1776,17 +1925,18 @@ ${jobDescription}`;
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: additionalSkillsPrompt },
             ],
+            response_format: { type: 'json_object' },
             temperature: 0.5,
             max_completion_tokens: 500,
         });
         const additionalContent = (_f = (_e = (_d = additionalResponse.choices[0]) === null || _d === void 0 ? void 0 : _d.message) === null || _e === void 0 ? void 0 : _e.content) === null || _f === void 0 ? void 0 : _f.trim();
         if (additionalContent) {
-            try {
-                const additionalSkills = JSON.parse(additionalContent);
+            const additionalSkills = tryParseJsonStringArray(additionalContent);
+            if (additionalSkills) {
                 newSkills.push(...additionalSkills);
             }
-            catch (parseError) {
-                console.warn('Failed to parse additional skills:', parseError);
+            else {
+                console.warn('Failed to parse additional skills: model did not return a valid JSON array of strings');
             }
         }
         // Process new skills and add them to matched skills

@@ -40,6 +40,9 @@ import { requirePremium, withPremiumFeatures } from '../middleware/subscription'
 
 const router = express.Router();
 
+// Preserve these tokens/terms in job titles when translating (e.g., "Senior Data Consultant" -> "Consultant Senior Data").
+const JOB_TITLE_PRESERVE_TERMS = ['Data'];
+
 async function resolveChromeExecutablePath(puppeteer: any): Promise<string | undefined> {
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
         const fs = require('fs');
@@ -162,12 +165,19 @@ async function translateResumeContent(
         return await translateText(trimmed, normalizedTarget);
     };
 
+    const translateJobTitleField = async (text?: string | null): Promise<string | undefined> => {
+        if (text === null || typeof text === 'undefined') return text ?? undefined;
+        const trimmed = text.toString().trim();
+        if (trimmed.length === 0) return text ?? undefined;
+        return await translateText(trimmed, normalizedTarget, { preserveTerms: JOB_TITLE_PRESERVE_TERMS });
+    };
+
     const translatedSummary = await translateField(data.summary);
 
     const translatedWorkExperience = await Promise.all(
         (data.workExperience || []).map(async (exp) => ({
             ...exp,
-            jobTitle: (await translateField(exp.jobTitle)) ?? exp.jobTitle,
+            jobTitle: (await translateJobTitleField(exp.jobTitle)) ?? exp.jobTitle,
             company: exp.company,
             location: (await translateField(exp.location)) ?? exp.location,
             description: (await translateField(exp.description)) ?? exp.description,
@@ -209,6 +219,45 @@ async function translateResumeContent(
         certifications: translatedCertifications,
         skills: translatedSkills,
     };
+}
+
+function mapDbResumeToSchemaInput(resume: any, language: string): ResumeSchemaInput {
+    return {
+        fullName: resume.fullName,
+        email: resume.email,
+        phone: resume.phone || undefined,
+        address: resume.address || undefined,
+        linkedIn: resume.linkedIn || undefined,
+        website: resume.website || undefined,
+        summary: resume.summary || undefined,
+        skills: (resume.skills || []).map((s: any) => ({ name: s.name })),
+        workExperience: (resume.workExperiences || []).map((exp: any) => ({
+            jobTitle: exp.jobTitle,
+            company: exp.company,
+            location: exp.location,
+            startDate: exp.startDate,
+            endDate: exp.endDate,
+            description: exp.description,
+            companyDescription: exp.companyDescription,
+            techStack: exp.techStack,
+        })),
+        education: (resume.educations || []).map((edu: any) => ({
+            degree: edu.degree,
+            major: edu.major,
+            institution: edu.institution,
+            startYear: edu.startYear,
+            graduationYear: edu.graduationYear,
+            gpa: edu.gpa,
+            description: edu.description,
+        })),
+        certifications: (resume.certifications || []).map((cert: any) => ({
+            name: cert.name,
+            issuer: cert.issuer,
+            issueDate: cert.issueDate,
+        })),
+        languages: resume.languages || [],
+        language,
+    } as any;
 }
 
 // Looser education schema for updates to allow optional/empty startYear values
@@ -380,22 +429,19 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         }
 
         const { template = 'modern', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
         // Check if user is premium, if not restrict to basic template
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern';
 
-        // Ensure skills are properly formatted for PDF template
-        const pdfData = {
+        // Clean descriptions first (before translation) to avoid translating duplicated companyDescription text
+        const preparedData: ResumeSchemaInput = {
             ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
-                jobTitle: exp.jobTitle,
-                company: exp.company,
-                location: exp.location,
-                startDate: exp.startDate,
-                endDate: exp.endDate,
+            workExperience: (validatedData.workExperience || []).map((exp: any) => ({
+                ...exp,
                 description: (() => {
                     const cd = (exp.companyDescription || '').toString().trim();
                     if (!cd) return exp.description;
@@ -410,14 +456,33 @@ router.post('/new/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
                         return exp.description;
                     }
                 })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
+            })),
+        };
+
+        // Translate content when user explicitly requests a resume language
+        const outputData = languageProvided
+            ? await translateResumeContent(preparedData, normalizedLanguage)
+            : preparedData;
+
+        // Ensure skills are properly formatted for PDF template
+        const pdfData = {
+            ...outputData,
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
+                jobTitle: exp.jobTitle,
+                company: exp.company,
+                location: exp.location,
+                startDate: exp.startDate,
+                endDate: exp.endDate,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            })))
+            })),
         };
 
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
 
         sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
@@ -520,7 +585,9 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         }
 
         const { template = 'modern', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
         const resume = await createResume({
             ...validatedData,
@@ -535,27 +602,29 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern';
 
+        const outputData = languageProvided
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : validatedData;
+
         // Ensure skills are properly formatted for PDF template
         const pdfData = {
-            ...validatedData,
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp: any) => ({
+            ...outputData,
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            })))
+            })),
         };
 
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language);
+        const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
 
         sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
@@ -573,6 +642,8 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language = 'en' } = req.query;
+        const languageProvided = typeof req.query.language === 'string' && req.query.language.trim().length > 0;
+        const normalizedLanguage = normalizeLanguageCode(languageProvided ? (req.query.language as string) : undefined);
 
         if (!userId) {
             handleUnauthorized(res);
@@ -594,36 +665,40 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? (template as string) : 'modern';
 
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
+
         // Build data in the shape expected by templates
         const pdfData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))),
-            education: resume.educations?.map((edu: any) => ({
+            })),
+            education: (outputData.education || []).map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
@@ -632,7 +707,7 @@ router.get('/:id/download', ensureAuthenticated, withPremiumFeatures, asyncHandl
 
         // Generate PDF using template
         const generateResume = require('../templates');
-        const doc = generateResume(pdfData, finalTemplate, language as string);
+        const doc = generateResume(pdfData, finalTemplate, (normalizedLanguage || (language as string)) as string);
 
         sendPdfDocument(res, doc, 'resume.pdf');
     } catch (error) {
@@ -813,7 +888,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 if (validatedData.workExperience && validatedData.workExperience.length > 0) {
                     validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
                         ...exp,
-                        jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, targetLanguage) : exp.jobTitle,
+                        jobTitle: exp.jobTitle ? await translateText(exp.jobTitle, targetLanguage, { preserveTerms: JOB_TITLE_PRESERVE_TERMS }) : exp.jobTitle,
                         company: exp.company, // company names typically unchanged
                         location: exp.location ? await translateText(exp.location, targetLanguage) : exp.location,
                         description: exp.description ? await translateText(exp.description, targetLanguage) : exp.description,
@@ -1096,6 +1171,8 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'modern', language: reqLanguage } = req.body;
+        const languageProvided = typeof reqLanguage === 'string' && reqLanguage.trim().length > 0;
+        const normalizedLanguage = normalizeLanguageCode(languageProvided ? (reqLanguage as string) : undefined);
 
         if (!userId) {
             handleUnauthorized(res);
@@ -1117,36 +1194,40 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern'; // Free users get modern template only
 
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
+
         // Convert resume data to PDF format
         const pdfData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, reqLanguage as string) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))) || [],
-            education: resume.educations?.map((edu: any) => ({
+            })) || [],
+            education: (outputData.education || []).map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
@@ -1155,9 +1236,9 @@ router.post('/:id/pdf', ensureAuthenticated, withPremiumFeatures, asyncHandler(a
 
         // Generate PDF using template
         // Determine language: use provided or detect from content
-        let effectiveLanguage = (reqLanguage as string) || 'en';
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
         try {
-            if (!reqLanguage) {
+            if (!languageProvided) {
                 const basis = resume.summary || resume.workExperiences?.[0]?.description || '';
                 if (basis && basis.length > 0) {
                     const detected = await detectLanguage(basis);
@@ -1426,6 +1507,8 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'colorful', language = 'en' } = req.query as any;
+        const languageProvided = typeof req.query.language === 'string' && req.query.language.trim().length > 0;
+        const normalizedLanguage = normalizeLanguageCode(languageProvided ? (req.query.language as string) : undefined);
 
         if (!userId) {
             handleUnauthorized(res);
@@ -1442,34 +1525,40 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
             return;
         }
 
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
+
         // Convert resume data to HTML format
         const resumeData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                companyDescription: exp.companyDescription || undefined,
                 techStack: exp.techStack,
-            }))) || [],
-            education: resume.educations?.map((edu: any) => ({
+            })) || [],
+            education: (outputData.education || []).map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
@@ -1477,8 +1566,8 @@ router.post('/:id/html', ensureAuthenticated, asyncHandler(async (req: any, res)
         };
 
         // Determine effective language for preview: prefer query param, else detect
-        let effectiveLanguage = (language as string) || 'en';
-        if (!req.query.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
                 const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
                 if (basis) {
@@ -1508,7 +1597,9 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         }
 
         const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const validatedData = ResumeSchema.parse({ ...resumeData, language });
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
         // Save the resume to database first
         const resume = await createResume({
@@ -1520,34 +1611,39 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             userId
         } as ResumeData);
 
+        const outputData = languageProvided
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : validatedData;
+
         // Convert resume data to HTML format
         const htmlResumeData = {
-            fullName: validatedData.fullName,
-            email: validatedData.email,
-            phone: validatedData.phone || undefined,
-            address: validatedData.address || undefined,
-            linkedIn: validatedData.linkedIn || undefined,
-            website: validatedData.website || undefined,
-            summary: validatedData.summary || '',
-            workExperience: await Promise.all(validatedData.workExperience.map(async (exp) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
                 description: exp.description,
-                companyDescription: (exp as any).companyDescription ? await translateText((exp as any).companyDescription, language) : (exp as any).companyDescription,
+                companyDescription: (exp as any).companyDescription || undefined,
                 techStack: (exp as any).techStack,
-            }))),
-            education: validatedData.education.map(edu => ({
+            })),
+            education: (outputData.education || []).map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: validatedData.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: validatedData.languages || [],
-            certifications: validatedData.certifications?.map((cert: any) => ({
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
@@ -1556,8 +1652,8 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
 
         // Generate HTML
         // Determine effective language: prefer provided, else detect from summary/experience
-        let effectiveLanguage = (language as string) || 'en';
-        if (!req.body.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
                 const basis = (validatedData.summary || '') || (validatedData.workExperience?.[0]?.description || '');
                 if (basis) {
@@ -1617,6 +1713,10 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
         const { template = 'colorful', language = 'en' } = req.body;
+        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language')
+            && typeof req.body.language === 'string'
+            && req.body.language.trim().length > 0;
+        const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
 
         if (!userId) {
             handleUnauthorized(res);
@@ -1633,36 +1733,40 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
             return;
         }
 
+        const schemaLike = mapDbResumeToSchemaInput(resume, normalizedLanguage || 'en');
+        const outputData = languageProvided
+            ? await translateResumeContent(schemaLike, normalizedLanguage)
+            : schemaLike;
+
         // Convert resume data to HTML format
         const resumeData = {
-            fullName: resume.fullName,
-            email: resume.email,
-            phone: resume.phone || undefined,
-            address: resume.address || undefined,
-            linkedIn: resume.linkedIn || undefined,
-            website: resume.website || undefined,
-            summary: resume.summary || '',
-            workExperience: await Promise.all((resume.workExperiences || []).map(async (exp: any) => ({
+            fullName: outputData.fullName,
+            email: outputData.email,
+            phone: outputData.phone || undefined,
+            address: outputData.address || undefined,
+            linkedIn: outputData.linkedIn || undefined,
+            website: outputData.website || undefined,
+            summary: outputData.summary || '',
+            workExperience: (outputData.workExperience || []).map((exp: any) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
+                location: exp.location,
                 startDate: exp.startDate,
                 endDate: exp.endDate,
-                description: (() => {
-                    return exp.description;
-                })(),
-                companyDescription: exp.companyDescription ? await translateText(exp.companyDescription, language as string) : exp.companyDescription,
+                description: exp.description,
+                companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            }))),
-            education: resume.educations?.map((edu: any) => ({
+            })),
+            education: (outputData.education || []).map((edu: any) => ({
                 degree: edu.degree,
                 institution: edu.institution,
                 startYear: edu.startYear,
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
-            skills: resume.skills?.map((skill: any) => ({ name: skill.name })) || [],
-            languages: resume.languages || [],
-            certifications: resume.certifications?.map((cert: any) => ({
+            skills: outputData.skills?.map((skill: any) => ({ name: skill.name })) || [],
+            languages: outputData.languages || [],
+            certifications: (outputData.certifications || []).map((cert: any) => ({
                 name: cert.name,
                 issuer: cert.issuer,
                 issueDate: cert.issueDate || null,
@@ -1671,8 +1775,8 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
 
         // Generate HTML
         // Determine effective language: prefer provided, else detect from saved content
-        let effectiveLanguage = (language as string) || 'en';
-        if (!req.body.language) {
+        let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
+        if (!languageProvided) {
             try {
                 const basis = (resume.summary || '') || (resume.workExperiences?.[0]?.description || '');
                 if (basis) {
