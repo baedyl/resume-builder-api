@@ -1,11 +1,20 @@
 import { openai } from '../lib/openai';
 import { getLanguageInfo } from './language';
+import { protectPreservedTerms } from './preserveTerms';
 
 export interface OpenAIOptions {
     model?: string;
     temperature?: number;
     maxTokens?: number;
     maxRetries?: number;
+}
+
+export interface TranslateTextOptions {
+    /**
+     * Terms to preserve exactly as-is (not translated). Useful for job-title keywords like "Data", "AI", "DevOps".
+     * Matching is case-insensitive but the restored term uses the provided casing.
+     */
+    preserveTerms?: string[];
 }
 
 export async function callOpenAIWithRetry(
@@ -69,24 +78,36 @@ export async function enhanceWithOpenAI(
  */
 export async function translateText(
     text: string,
-    targetLanguageCode: string
+    targetLanguageCode: string,
+    options: TranslateTextOptions = {}
 ): Promise<string> {
     if (!text || text.trim().length === 0) return text;
+
+    const preserveTerms = (options.preserveTerms || []).filter((t) => typeof t === 'string' && t.trim().length > 0);
+    const protection = preserveTerms.length > 0 ? protectPreservedTerms(text, preserveTerms) : null;
+    const textForModel = protection?.protectedText ?? text;
+
     const languageInfo = getLanguageInfo(targetLanguageCode);
     const targetName = languageInfo.name || 'French';
     const systemMessage = 'You are a professional translator. Return only the translated text.';
-    const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.
+    const tokenInstruction = protection?.tokens?.length
+        ? `\nDo not translate, remove, or modify these tokens: ${protection.tokens.join(', ')}. Keep them exactly as-is (including underscores).\n`
+        : '\n';
+
+    const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.${tokenInstruction}
 
 Text:
-${text}`;
+${textForModel}`;
     try {
         const result = await callOpenAIWithRetry(prompt, systemMessage, {
             model: 'gpt-5.2',
             temperature: 0.2,
-            maxTokens: Math.min(Math.max(text.length * 2, 200), 1200),
+            maxTokens: Math.min(Math.max(textForModel.length * 2, 200), 1200),
             maxRetries: 2,
         });
-        return (result || text).trim();
+
+        const translated = (result || text).trim();
+        return (protection ? protection.restore(translated) : translated).trim();
     } catch (e) {
         return text;
     }
