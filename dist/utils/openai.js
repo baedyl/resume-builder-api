@@ -1,28 +1,16 @@
-import { openai } from '../lib/openai';
-import { getLanguageInfo } from './language';
-
-export interface OpenAIOptions {
-    model?: string;
-    temperature?: number;
-    maxTokens?: number;
-    maxRetries?: number;
-}
-
-export async function callOpenAIWithRetry(
-    prompt: string, 
-    systemMessage: string = 'You are a helpful assistant.',
-    options: OpenAIOptions = {}
-): Promise<string | null> {
-    const {
-        model = 'gpt-5.2',
-        temperature = 0.7,
-        maxTokens = 500,
-        maxRetries = 2
-    } = options;
-
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.callOpenAIWithRetry = callOpenAIWithRetry;
+exports.enhanceWithOpenAI = enhanceWithOpenAI;
+exports.translateText = translateText;
+const openai_1 = require("../lib/openai");
+const language_1 = require("./language");
+async function callOpenAIWithRetry(prompt, systemMessage = 'You are a helpful assistant.', options = {}) {
+    var _a, _b, _c;
+    const { model = 'gpt-5.2', temperature = 0.7, maxTokens = 500, maxRetries = 2 } = options;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            const response = await openai.chat.completions.create({
+            const response = await openai_1.openai.chat.completions.create({
                 model,
                 messages: [
                     { role: 'system', content: systemMessage },
@@ -31,48 +19,39 @@ export async function callOpenAIWithRetry(
                 temperature: temperature + (attempt - 1) * 0.1, // Increase creativity on retries
                 max_completion_tokens: maxTokens + (attempt - 1) * 100, // Increase token limit on retries
             });
-
-            const content = response.choices[0]?.message?.content?.trim();
+            const content = (_c = (_b = (_a = response.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c.trim();
             if (content && content.length > 0) {
                 return content;
             }
             console.warn(`Empty or invalid response on attempt ${attempt}`);
-        } catch (apiError) {
+        }
+        catch (apiError) {
             console.error(`OpenAI API error on attempt ${attempt}:`, apiError);
             if (attempt === maxRetries) {
                 throw apiError; // Rethrow on final attempt
             }
         }
     }
-
     return null;
 }
-
-export async function enhanceWithOpenAI(
-    prompt: string,
-    systemMessage: string = 'You are a helpful assistant.',
-    fallbackContent: string = '',
-    options: OpenAIOptions = {}
-): Promise<string> {
+async function enhanceWithOpenAI(prompt, systemMessage = 'You are a helpful assistant.', fallbackContent = '', options = {}) {
     try {
         const result = await callOpenAIWithRetry(prompt, systemMessage, options);
         return result || fallbackContent;
-    } catch (error) {
+    }
+    catch (error) {
         console.error('OpenAI enhancement failed:', error);
         return fallbackContent;
     }
-} 
-
+}
 /**
  * Translate a given text to the target language using OpenAI.
  * Keeps technical terms and proper nouns when appropriate.
  */
-export async function translateText(
-    text: string,
-    targetLanguageCode: string
-): Promise<string> {
-    if (!text || text.trim().length === 0) return text;
-    const languageInfo = getLanguageInfo(targetLanguageCode);
+async function translateText(text, targetLanguageCode) {
+    if (!text || text.trim().length === 0)
+        return text;
+    const languageInfo = (0, language_1.getLanguageInfo)(targetLanguageCode);
     const targetName = languageInfo.name || 'French';
     const systemMessage = 'You are a professional translator. Return only the translated text.';
     const prompt = `Translate the following text to ${targetName}. Keep technical terms and proper nouns as appropriate. Return only the translated text without quotes or additions.
@@ -87,7 +66,8 @@ ${text}`;
             maxRetries: 2,
         });
         return (result || text).trim();
-    } catch (e) {
+    }
+    catch (e) {
         return text;
     }
 }
