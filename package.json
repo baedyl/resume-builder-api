@@ -32,6 +32,7 @@
     "langs": "^2.0.0",
     "multer": "^2.0.1",
     "mustache": "^4.2.0",
+    "node-fetch": "^2.7.0",
     "openai": "^4.100.0",
     "pdfkit": "0.17.1",
     "prisma": "6.8.2",

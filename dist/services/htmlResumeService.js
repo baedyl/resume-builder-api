@@ -28,7 +28,10 @@ function processLanguageProficiency(language) {
             filled: i < level
         });
     }
-    return Object.assign(Object.assign({}, language), { proficiencyLevels: circles });
+    return {
+        ...language,
+        proficiencyLevels: circles
+    };
 }
 function formatDate(date) {
     if (!date)
@@ -49,11 +52,23 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
     const template = getTemplate(templateName);
     const languageConfig = (0, language_1.getLanguageConfig)(language);
     // Process data for template
-    const processedData = Object.assign(Object.assign({}, data), { titles: languageConfig.sections, labels: languageConfig.labels || { tech: 'Tech' }, showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0, headline: data.title || data.profession || data.role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined, languagesLine: (data.languages || [])
+    const processedData = {
+        ...data,
+        titles: languageConfig.sections,
+        labels: languageConfig.labels || { tech: 'Tech' },
+        showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0,
+        headline: data.title || data.profession || data.role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
+        languagesLine: (data.languages || [])
             .map(l => `${l.name}: ${l.proficiency}`)
-            .join(', '), skillsLine: (data.skills || [])
+            .join(', '),
+        skillsLine: (data.skills || [])
             .map(s => s.name)
-            .join(', '), workExperience: data.workExperience.map(exp => (Object.assign(Object.assign({}, exp), { startDate: formatDate(exp.startDate), endDate: exp.endDate && exp.endDate !== 'Present' ? formatDate(exp.endDate) : 'Present', tasks: (() => {
+            .join(', '),
+        workExperience: data.workExperience.map(exp => ({
+            ...exp,
+            startDate: formatDate(exp.startDate),
+            endDate: exp.endDate && exp.endDate !== 'Present' ? formatDate(exp.endDate) : 'Present',
+            tasks: (() => {
                 const companyDesc = String(exp.companyDescription || '').trim();
                 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const base = String(exp.description || '');
@@ -76,10 +91,17 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
                     seen.add(normalized);
                     return true;
                 });
-            })() }))), education: data.education.map(edu => {
+            })()
+        })),
+        education: data.education.map(edu => {
             var _a;
-            return (Object.assign(Object.assign({}, edu), { startYear: edu.startYear, graduationYear: (_a = edu.graduationYear) === null || _a === void 0 ? void 0 : _a.toString() }));
-        }), languages: data.languages.map(l => {
+            return ({
+                ...edu,
+                startYear: edu.startYear,
+                graduationYear: (_a = edu.graduationYear) === null || _a === void 0 ? void 0 : _a.toString()
+            });
+        }),
+        languages: data.languages.map(l => {
             const name = (0, language_1.localizeLanguageName)(l.name, language);
             const proficiency = (0, language_1.localizeProficiency)(l.proficiency, language);
             const processed = processLanguageProficiency({ name, proficiency });
@@ -88,6 +110,11 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
                 proficiency,
                 proficiencyLevels: processed.proficiencyLevels
             };
-        }), certifications: (data.certifications || []).map(cert => (Object.assign(Object.assign({}, cert), { issueDate: cert.issueDate ? formatDate(cert.issueDate) : undefined }))) });
+        }),
+        certifications: (data.certifications || []).map(cert => ({
+            ...cert,
+            issueDate: cert.issueDate ? formatDate(cert.issueDate) : undefined
+        }))
+    };
     return mustache_1.default.render(template, processedData);
 }

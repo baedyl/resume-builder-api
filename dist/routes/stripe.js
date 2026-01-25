@@ -901,7 +901,10 @@ async function handleSubscriptionUpdate(subscription) {
         if (!existingUser) {
             console.log('Creating new user record for subscription update:', userId);
             await database_1.prisma.user.create({
-                data: Object.assign({ id: userId }, updateData)
+                data: {
+                    id: userId,
+                    ...updateData
+                }
             });
         }
         else {
@@ -1008,7 +1011,10 @@ async function handleInvoiceCreated(invoice) {
         if (!existingUser) {
             console.log('Creating new user record for invoice created:', userId);
             await database_1.prisma.user.create({
-                data: Object.assign({ id: userId }, updateData)
+                data: {
+                    id: userId,
+                    ...updateData
+                }
             });
         }
         else {
@@ -1063,7 +1069,10 @@ async function handlePaymentSuccess(invoice) {
         if (!existingUser) {
             console.log('Creating new user record for payment success:', userId);
             await database_1.prisma.user.create({
-                data: Object.assign({ id: userId }, updateData)
+                data: {
+                    id: userId,
+                    ...updateData
+                }
             });
         }
         else {

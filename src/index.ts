@@ -2,14 +2,25 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Polyfill fetch for Node 16
+if (!global.fetch) {
+    const nodeFetch = require('node-fetch');
+    (global as any).fetch = nodeFetch;
+    (global as any).Headers = nodeFetch.Headers;
+    (global as any).Request = nodeFetch.Request;
+    (global as any).Response = nodeFetch.Response;
+}
+
 const express = require('express');
 import cors from 'cors';
 import resumeRouter from './routes/resume';
 import skillRouter from './routes/skill';
 import coverLetterRouter from './routes/coverLetter';
 import jobRouter from './routes/job';
+import jobOpportunityRouter from './routes/jobOpportunity';
 import stripeRouter from './routes/stripe';
 import { ensureAuthenticated } from './middleware/auth'; // Adjust path as needed
+import { JobScheduler } from './services/jobScheduler';
 
 const app = express();
 
@@ -50,6 +61,29 @@ app.use('/api/resumes', ensureAuthenticated, resumeRouter);
 app.use('/api/skills', skillRouter);
 app.use('/api/cover-letter', coverLetterRouter);
 app.use('/api/jobs', jobRouter);
+app.use('/api/job-opportunities', jobOpportunityRouter);
 app.use('/api/stripe', stripeRouter);
 
-app.listen(3000, () => console.log('Server running on port 3000'));
+// Start job scheduler
+JobScheduler.start();
+
+const server = app.listen(3000, () => console.log('Server running on port 3000'));
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  JobScheduler.stop();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  JobScheduler.stop();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+});
