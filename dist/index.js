@@ -6,14 +6,24 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // Load environment variables first
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+// Polyfill fetch for Node 16
+if (!global.fetch) {
+    const nodeFetch = require('node-fetch');
+    global.fetch = nodeFetch;
+    global.Headers = nodeFetch.Headers;
+    global.Request = nodeFetch.Request;
+    global.Response = nodeFetch.Response;
+}
 const express = require('express');
 const cors_1 = __importDefault(require("cors"));
 const resume_1 = __importDefault(require("./routes/resume"));
 const skill_1 = __importDefault(require("./routes/skill"));
 const coverLetter_1 = __importDefault(require("./routes/coverLetter"));
 const job_1 = __importDefault(require("./routes/job"));
+const jobOpportunity_1 = __importDefault(require("./routes/jobOpportunity"));
 const stripe_1 = __importDefault(require("./routes/stripe"));
 const auth_1 = require("./middleware/auth"); // Adjust path as needed
+const jobScheduler_1 = require("./services/jobScheduler");
 const app = express();
 // Configure CORS for your frontend origins
 app.use((0, cors_1.default)({
@@ -48,5 +58,25 @@ app.use('/api/resumes', auth_1.ensureAuthenticated, resume_1.default);
 app.use('/api/skills', skill_1.default);
 app.use('/api/cover-letter', coverLetter_1.default);
 app.use('/api/jobs', job_1.default);
+app.use('/api/job-opportunities', jobOpportunity_1.default);
 app.use('/api/stripe', stripe_1.default);
-app.listen(3000, () => console.log('Server running on port 3000'));
+// Start job scheduler
+jobScheduler_1.JobScheduler.start();
+const server = app.listen(3000, () => console.log('Server running on port 3000'));
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('Received SIGINT, shutting down gracefully...');
+    jobScheduler_1.JobScheduler.stop();
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
+});
+process.on('SIGTERM', () => {
+    console.log('Received SIGTERM, shutting down gracefully...');
+    jobScheduler_1.JobScheduler.stop();
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
+});

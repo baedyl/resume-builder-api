@@ -273,7 +273,24 @@ router.put('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(
         }
         const updatedJob = await database_1.prisma.job.update({
             where: { id: jobId },
-            data: Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign(Object.assign({}, (position !== undefined && { position })), (company !== undefined && { company })), (location !== undefined && { location })), (maxSalary !== undefined && { maxSalary })), (status !== undefined && { status })), (deadline !== undefined && { deadline: (0, dates_1.parseDate)(deadline) })), (dateApplied !== undefined && { dateApplied: (0, dates_1.parseDate)(dateApplied) })), (followUp !== undefined && { followUp: (0, dates_1.parseDate)(followUp) })), (comment !== undefined && { comment })), (jobUrl !== undefined && { jobUrl })), (description !== undefined && { description })), (notes !== undefined && { notes })), (interviewDate !== undefined && { interviewDate: (0, dates_1.parseDate)(interviewDate) })), (contactPerson !== undefined && { contactPerson })), (contactEmail !== undefined && { contactEmail })), (contactPhone !== undefined && { contactPhone })),
+            data: {
+                ...(position !== undefined && { position }),
+                ...(company !== undefined && { company }),
+                ...(location !== undefined && { location }),
+                ...(maxSalary !== undefined && { maxSalary }),
+                ...(status !== undefined && { status }),
+                ...(deadline !== undefined && { deadline: (0, dates_1.parseDate)(deadline) }),
+                ...(dateApplied !== undefined && { dateApplied: (0, dates_1.parseDate)(dateApplied) }),
+                ...(followUp !== undefined && { followUp: (0, dates_1.parseDate)(followUp) }),
+                ...(comment !== undefined && { comment }),
+                ...(jobUrl !== undefined && { jobUrl }),
+                ...(description !== undefined && { description }),
+                ...(notes !== undefined && { notes }),
+                ...(interviewDate !== undefined && { interviewDate: (0, dates_1.parseDate)(interviewDate) }),
+                ...(contactPerson !== undefined && { contactPerson }),
+                ...(contactEmail !== undefined && { contactEmail }),
+                ...(contactPhone !== undefined && { contactPhone }),
+            },
         });
         res.json(updatedJob);
     }

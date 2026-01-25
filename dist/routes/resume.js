@@ -1,15 +1,4 @@
 "use strict";
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -35,51 +24,67 @@ const router = express_1.default.Router();
 // Preserve these tokens/terms in job titles when translating (e.g., "Senior Data Consultant" -> "Consultant Senior Data").
 const JOB_TITLE_PRESERVE_TERMS = ['Data'];
 async function resolveChromeExecutablePath(puppeteer) {
+    const fs = require('fs');
+    // 1. Try explicit environment variable first
     if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim().length > 0) {
-        const fs = require('fs');
-        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH))
+        if (fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+            console.log(`Using PUPPETEER_EXECUTABLE_PATH: ${process.env.PUPPETEER_EXECUTABLE_PATH}`);
             return process.env.PUPPETEER_EXECUTABLE_PATH;
+        }
     }
-    // Try common Render cache locations for @puppeteer/browsers
+    // 2. Try Puppeteer's default resolution
     try {
-        const fs = require('fs');
+        const path = puppeteer.executablePath();
+        if (path && fs.existsSync(path)) {
+            console.log(`Using puppeteer.executablePath(): ${path}`);
+            return path;
+        }
+    }
+    catch (e) {
+        console.warn('puppeteer.executablePath() failed:', e);
+    }
+    // 3. Fallback: Try common Render/cloud cache locations
+    try {
         const path = require('path');
         const candidateCacheRoots = [
             process.env.PUPPETEER_CACHE_DIR,
+            path.join(process.cwd(), '.cache', 'puppeteer'),
             '/opt/render/.cache/puppeteer',
             '/opt/render/project/.cache/puppeteer',
             process.env.HOME ? `${process.env.HOME}/.cache/puppeteer` : undefined,
             '/root/.cache/puppeteer'
         ].filter(Boolean);
+        console.log('Searching for Chrome in cache roots:', candidateCacheRoots);
         for (const cacheDir of candidateCacheRoots) {
             if (!fs.existsSync(cacheDir))
                 continue;
+            // Check for 'chrome' directory (newer puppeteer versions)
             const chromeRoot = path.join(cacheDir, 'chrome');
-            if (!fs.existsSync(chromeRoot))
-                continue;
-            const versions = fs.readdirSync(chromeRoot).sort();
-            for (let i = versions.length - 1; i >= 0; i--) {
-                const verDir = path.join(chromeRoot, versions[i]);
-                const linux64 = path.join(verDir, 'chrome-linux64', 'chrome');
-                if (fs.existsSync(linux64))
-                    return linux64;
-                const linux = path.join(verDir, 'chrome-linux', 'chrome');
-                if (fs.existsSync(linux))
-                    return linux;
+            if (fs.existsSync(chromeRoot)) {
+                const versions = fs.readdirSync(chromeRoot).sort();
+                for (let i = versions.length - 1; i >= 0; i--) {
+                    const verDir = path.join(chromeRoot, versions[i]);
+                    // Check various common binary paths
+                    const candidates = [
+                        path.join(verDir, 'chrome-linux64', 'chrome'),
+                        path.join(verDir, 'chrome-linux', 'chrome'),
+                        path.join(verDir, 'chrome'),
+                    ];
+                    for (const candidate of candidates) {
+                        if (fs.existsSync(candidate)) {
+                            console.log(`Found Chrome in cache: ${candidate}`);
+                            return candidate;
+                        }
+                    }
+                }
             }
         }
     }
-    catch (_) { /* ignore */ }
-    try {
-        const path = await puppeteer.executablePath();
-        const fs = require('fs');
-        if (path && fs.existsSync(path))
-            return path;
-        return undefined;
+    catch (e) {
+        console.warn('Manual cache search failed:', e);
     }
-    catch (_) {
-        return undefined;
-    }
+    console.warn('Could not resolve Chrome executable path');
+    return undefined;
 }
 // Helper to send PDFKit documents reliably by buffering and setting Content-Length
 function sendPdfDocument(res, doc, filename) {
@@ -146,7 +151,10 @@ async function translateResumeContent(data, targetLanguage) {
         }
     }
     if (sourceLanguage === normalizedTarget) {
-        return Object.assign(Object.assign({}, data), { language: normalizedTarget });
+        return {
+            ...data,
+            language: normalizedTarget,
+        };
     }
     const translateField = async (text) => {
         if (text === null || typeof text === 'undefined')
@@ -167,21 +175,49 @@ async function translateResumeContent(data, targetLanguage) {
     const translatedSummary = await translateField(data.summary);
     const translatedWorkExperience = await Promise.all((data.workExperience || []).map(async (exp) => {
         var _a, _b, _c, _d;
-        return (Object.assign(Object.assign({}, exp), { jobTitle: (_a = (await translateJobTitleField(exp.jobTitle))) !== null && _a !== void 0 ? _a : exp.jobTitle, company: exp.company, location: (_b = (await translateField(exp.location))) !== null && _b !== void 0 ? _b : exp.location, description: (_c = (await translateField(exp.description))) !== null && _c !== void 0 ? _c : exp.description, companyDescription: (_d = (await translateField(exp.companyDescription))) !== null && _d !== void 0 ? _d : exp.companyDescription }));
+        return ({
+            ...exp,
+            jobTitle: (_a = (await translateJobTitleField(exp.jobTitle))) !== null && _a !== void 0 ? _a : exp.jobTitle,
+            company: exp.company,
+            location: (_b = (await translateField(exp.location))) !== null && _b !== void 0 ? _b : exp.location,
+            description: (_c = (await translateField(exp.description))) !== null && _c !== void 0 ? _c : exp.description,
+            companyDescription: (_d = (await translateField(exp.companyDescription))) !== null && _d !== void 0 ? _d : exp.companyDescription,
+        });
     }));
     const translatedEducation = await Promise.all((data.education || []).map(async (edu) => {
         var _a, _b, _c;
-        return (Object.assign(Object.assign({}, edu), { degree: (_a = (await translateField(edu.degree))) !== null && _a !== void 0 ? _a : edu.degree, major: (_b = (await translateField(edu.major))) !== null && _b !== void 0 ? _b : edu.major, institution: edu.institution, description: (_c = (await translateField(edu.description))) !== null && _c !== void 0 ? _c : edu.description }));
+        return ({
+            ...edu,
+            degree: (_a = (await translateField(edu.degree))) !== null && _a !== void 0 ? _a : edu.degree,
+            major: (_b = (await translateField(edu.major))) !== null && _b !== void 0 ? _b : edu.major,
+            institution: edu.institution,
+            description: (_c = (await translateField(edu.description))) !== null && _c !== void 0 ? _c : edu.description,
+        });
     }));
     const translatedCertifications = await Promise.all((data.certifications || []).map(async (cert) => {
         var _a;
-        return (Object.assign(Object.assign({}, cert), { name: (_a = (await translateField(cert.name))) !== null && _a !== void 0 ? _a : cert.name, issuer: cert.issuer }));
+        return ({
+            ...cert,
+            name: (_a = (await translateField(cert.name))) !== null && _a !== void 0 ? _a : cert.name,
+            issuer: cert.issuer,
+        });
     }));
     const translatedSkills = await Promise.all((data.skills || []).map(async (skill) => {
         var _a;
-        return (Object.assign(Object.assign({}, skill), { name: (_a = (await translateField(skill.name))) !== null && _a !== void 0 ? _a : skill.name }));
+        return ({
+            ...skill,
+            name: (_a = (await translateField(skill.name))) !== null && _a !== void 0 ? _a : skill.name,
+        });
     }));
-    return Object.assign(Object.assign({}, data), { language: normalizedTarget, summary: translatedSummary !== null && translatedSummary !== void 0 ? translatedSummary : undefined, workExperience: translatedWorkExperience, education: translatedEducation, certifications: translatedCertifications, skills: translatedSkills });
+    return {
+        ...data,
+        language: normalizedTarget,
+        summary: translatedSummary !== null && translatedSummary !== void 0 ? translatedSummary : undefined,
+        workExperience: translatedWorkExperience,
+        education: translatedEducation,
+        certifications: translatedCertifications,
+        skills: translatedSkills,
+    };
 }
 function mapDbResumeToSchemaInput(resume, language) {
     return {
@@ -371,15 +407,19 @@ router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
+        const { template = 'modern', language = 'en', ...resumeData } = req.body;
         const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
         // Clean descriptions first (before translation) to avoid translating duplicated companyDescription text
-        const preparedData = Object.assign(Object.assign({}, validatedData), { workExperience: (validatedData.workExperience || []).map((exp) => (Object.assign(Object.assign({}, exp), { description: (() => {
+        const preparedData = {
+            ...validatedData,
+            workExperience: (validatedData.workExperience || []).map((exp) => ({
+                ...exp,
+                description: (() => {
                     const cd = (exp.companyDescription || '').toString().trim();
                     if (!cd)
                         return exp.description;
@@ -394,13 +434,18 @@ router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
                     catch (_) {
                         return exp.description;
                     }
-                })() }))) });
+                })(),
+            })),
+        };
         // Translate content when user explicitly requests a resume language
         const outputData = languageProvided
             ? await translateResumeContent(preparedData, normalizedLanguage)
             : preparedData;
         // Ensure skills are properly formatted for PDF template
-        const pdfData = Object.assign(Object.assign({}, outputData), { skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: (outputData.workExperience || []).map((exp) => ({
+        const pdfData = {
+            ...outputData,
+            skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -409,7 +454,8 @@ router.post('/new/pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFe
                 description: exp.description,
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            })) });
+            })),
+        };
         // Generate PDF using template without saving to database
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
@@ -433,14 +479,14 @@ router.post('/new/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHan
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _e = req.body, { template = 'colorful', language = 'en' } = _e, resumeData = __rest(_e, ["template", "language"]);
+        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
         const resumeContent = req.body.language
             ? await translateResumeContent(validatedData, normalizedLanguage)
             : (validatedData.language === normalizedLanguage
                 ? validatedData
-                : Object.assign(Object.assign({}, validatedData), { language: normalizedLanguage }));
+                : { ...validatedData, language: normalizedLanguage });
         // Convert validated (and possibly translated) data to HTML format
         const htmlResumeData = {
             fullName: resumeContent.fullName,
@@ -487,7 +533,7 @@ router.post('/new/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHan
                     }
                 }
             }
-            catch (_f) { }
+            catch (_e) { }
         }
         const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         res.setHeader('Content-Type', 'text/html');
@@ -511,14 +557,21 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _d = req.body, { template = 'modern', language = 'en' } = _d, resumeData = __rest(_d, ["template", "language"]);
+        const { template = 'modern', language = 'en', ...resumeData } = req.body;
         const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
-        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
+        const resume = await (0, resumeService_1.createResume)({
+            ...validatedData,
+            education: (validatedData.education || []).map((edu) => {
                 var _a;
-                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
-            }), userId }));
+                return ({
+                    ...edu,
+                    startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined,
+                });
+            }),
+            userId
+        });
         // Check if user is premium, if not restrict to basic template
         const isPremium = ((_b = req.user) === null || _b === void 0 ? void 0 : _b.isPremium) || false;
         const finalTemplate = isPremium ? template : 'modern';
@@ -526,7 +579,10 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
             ? await translateResumeContent(validatedData, normalizedLanguage)
             : validatedData;
         // Ensure skills are properly formatted for PDF template
-        const pdfData = Object.assign(Object.assign({}, outputData), { skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [], workExperience: (outputData.workExperience || []).map((exp) => ({
+        const pdfData = {
+            ...outputData,
+            skills: ((_c = outputData.skills) === null || _c === void 0 ? void 0 : _c.map((skill) => ({ name: skill.name }))) || [],
+            workExperience: (outputData.workExperience || []).map((exp) => ({
                 jobTitle: exp.jobTitle,
                 company: exp.company,
                 location: exp.location,
@@ -535,7 +591,8 @@ router.post('/save-and-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
                 description: exp.description,
                 companyDescription: exp.companyDescription,
                 techStack: exp.techStack,
-            })) });
+            })),
+        };
         // Generate PDF using template
         const generateResume = require('../templates');
         const doc = generateResume(pdfData, finalTemplate, normalizedLanguage);
@@ -630,14 +687,21 @@ router.post('/', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(as
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _f = req.body, { template = 'modern' } = _f, resumeData = __rest(_f, ["template"]);
+        const { template = 'modern', ...resumeData } = req.body;
         console.log('Received work experience count:', ((_b = resumeData.workExperience) === null || _b === void 0 ? void 0 : _b.length) || 0);
         const validatedData = ResumeSchema.parse(resumeData);
         console.log('Validated work experience count:', ((_c = validatedData.workExperience) === null || _c === void 0 ? void 0 : _c.length) || 0);
-        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+        const resume = await (0, resumeService_1.createResume)({
+            ...validatedData,
+            education: (validatedData.education || []).map((edu) => {
                 var _a;
-                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
-            }), userId }));
+                return ({
+                    ...edu,
+                    startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined,
+                });
+            }),
+            userId
+        });
         // Fetch the complete resume with all relations to verify data was saved
         const completeResume = await (0, resumeService_1.getResumeById)(resume.id, userId);
         console.log('Saved work experiences:', ((_d = completeResume === null || completeResume === void 0 ? void 0 : completeResume.workExperiences) === null || _d === void 0 ? void 0 : _d.length) || 0);
@@ -771,21 +835,44 @@ router.put('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(
                     validatedData.summary = await (0, openai_2.translateText)(validatedData.summary, targetLanguage);
                 }
                 if (validatedData.workExperience && validatedData.workExperience.length > 0) {
-                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => (Object.assign(Object.assign({}, exp), { jobTitle: exp.jobTitle ? await (0, openai_2.translateText)(exp.jobTitle, targetLanguage, { preserveTerms: JOB_TITLE_PRESERVE_TERMS }) : exp.jobTitle, company: exp.company, location: exp.location ? await (0, openai_2.translateText)(exp.location, targetLanguage) : exp.location, description: exp.description ? await (0, openai_2.translateText)(exp.description, targetLanguage) : exp.description }))));
+                    validatedData.workExperience = await Promise.all(validatedData.workExperience.map(async (exp) => ({
+                        ...exp,
+                        jobTitle: exp.jobTitle ? await (0, openai_2.translateText)(exp.jobTitle, targetLanguage, { preserveTerms: JOB_TITLE_PRESERVE_TERMS }) : exp.jobTitle,
+                        company: exp.company, // company names typically unchanged
+                        location: exp.location ? await (0, openai_2.translateText)(exp.location, targetLanguage) : exp.location,
+                        description: exp.description ? await (0, openai_2.translateText)(exp.description, targetLanguage) : exp.description,
+                    })));
                 }
                 if (validatedData.education && validatedData.education.length > 0) {
-                    validatedData.education = await Promise.all(validatedData.education.map(async (edu) => (Object.assign(Object.assign({}, edu), { degree: edu.degree ? await (0, openai_2.translateText)(edu.degree, targetLanguage) : edu.degree, major: edu.major ? await (0, openai_2.translateText)(edu.major, targetLanguage) : edu.major, institution: edu.institution, description: edu.description ? await (0, openai_2.translateText)(edu.description, targetLanguage) : edu.description }))));
+                    validatedData.education = await Promise.all(validatedData.education.map(async (edu) => ({
+                        ...edu,
+                        degree: edu.degree ? await (0, openai_2.translateText)(edu.degree, targetLanguage) : edu.degree,
+                        major: edu.major ? await (0, openai_2.translateText)(edu.major, targetLanguage) : edu.major,
+                        institution: edu.institution, // proper noun
+                        description: edu.description ? await (0, openai_2.translateText)(edu.description, targetLanguage) : edu.description,
+                    })));
                 }
                 if (validatedData.certifications && validatedData.certifications.length > 0) {
-                    validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => (Object.assign(Object.assign({}, cert), { name: cert.name ? await (0, openai_2.translateText)(cert.name, targetLanguage) : cert.name, issuer: cert.issuer }))));
+                    validatedData.certifications = await Promise.all(validatedData.certifications.map(async (cert) => ({
+                        ...cert,
+                        name: cert.name ? await (0, openai_2.translateText)(cert.name, targetLanguage) : cert.name,
+                        issuer: cert.issuer, // proper noun
+                    })));
                 }
                 // Translate skills (technical terms, but some might benefit from translation)
                 if (validatedData.skills && validatedData.skills.length > 0) {
-                    validatedData.skills = await Promise.all(validatedData.skills.map(async (skill) => (Object.assign(Object.assign({}, skill), { name: skill.name ? await (0, openai_2.translateText)(skill.name, targetLanguage) : skill.name }))));
+                    validatedData.skills = await Promise.all(validatedData.skills.map(async (skill) => ({
+                        ...skill,
+                        name: skill.name ? await (0, openai_2.translateText)(skill.name, targetLanguage) : skill.name,
+                    })));
                 }
                 // Translate language proficiency levels
                 if (validatedData.languages && validatedData.languages.length > 0) {
-                    validatedData.languages = await Promise.all(validatedData.languages.map(async (lang) => (Object.assign(Object.assign({}, lang), { name: lang.name, proficiency: lang.proficiency ? await (0, openai_2.translateText)(lang.proficiency, targetLanguage) : lang.proficiency }))));
+                    validatedData.languages = await Promise.all(validatedData.languages.map(async (lang) => ({
+                        ...lang,
+                        name: lang.name, // language names are typically kept as-is (e.g., "English", "French")
+                        proficiency: lang.proficiency ? await (0, openai_2.translateText)(lang.proficiency, targetLanguage) : lang.proficiency,
+                    })));
                 }
                 console.log(`Translation completed for ${targetLanguage}`);
             }
@@ -812,56 +899,71 @@ router.put('/:id', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHandler)(
             updateData.summary = validatedData.summary;
         // Update skills and languages if provided
         if (skillsProvided) {
-            updateData.skills = Object.assign({ set: [] }, (processedSkills.length > 0 ? { connect: processedSkills.map((skill) => ({ id: skill.id })) } : {}));
+            updateData.skills = {
+                set: [],
+                ...(processedSkills.length > 0 ? { connect: processedSkills.map((skill) => ({ id: skill.id })) } : {})
+            };
         }
         if (languagesProvided) {
-            updateData.languages = Object.assign({ set: [] }, (processedLanguages.length > 0 ? { connect: processedLanguages.map((lang) => ({ id: lang.id })) } : {}));
+            updateData.languages = {
+                set: [],
+                ...(processedLanguages.length > 0 ? { connect: processedLanguages.map((lang) => ({ id: lang.id })) } : {})
+            };
         }
         // Update work experiences if provided
         if (workExperienceProvided) {
-            updateData.workExperiences = Object.assign({ deleteMany: {} }, (validatedData.workExperience && validatedData.workExperience.length > 0
-                ? {
-                    create: validatedData.workExperience.map((exp) => ({
-                        jobTitle: exp.jobTitle,
-                        company: exp.company,
-                        location: exp.location,
-                        startDate: new Date(exp.startDate),
-                        endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
-                        description: exp.description,
-                        companyDescription: exp.companyDescription,
-                        techStack: exp.techStack,
-                    })),
-                }
-                : {}));
+            updateData.workExperiences = {
+                deleteMany: {},
+                ...(validatedData.workExperience && validatedData.workExperience.length > 0
+                    ? {
+                        create: validatedData.workExperience.map((exp) => ({
+                            jobTitle: exp.jobTitle,
+                            company: exp.company,
+                            location: exp.location,
+                            startDate: new Date(exp.startDate),
+                            endDate: exp.endDate && exp.endDate !== 'Present' ? new Date(exp.endDate) : null,
+                            description: exp.description,
+                            companyDescription: exp.companyDescription,
+                            techStack: exp.techStack,
+                        })),
+                    }
+                    : {})
+            };
         }
         // Update educations if provided
         if (educationProvided) {
-            updateData.educations = Object.assign({ deleteMany: {} }, (validatedData.education && validatedData.education.length > 0
-                ? {
-                    create: validatedData.education.map(edu => {
-                        var _a;
-                        return ({
-                            degree: edu.degree,
-                            institution: edu.institution,
-                            startYear: (_a = edu.startYear) !== null && _a !== void 0 ? _a : undefined,
-                            graduationYear: edu.graduationYear,
-                            description: edu.description,
-                        });
-                    }),
-                }
-                : {}));
+            updateData.educations = {
+                deleteMany: {},
+                ...(validatedData.education && validatedData.education.length > 0
+                    ? {
+                        create: validatedData.education.map(edu => {
+                            var _a;
+                            return ({
+                                degree: edu.degree,
+                                institution: edu.institution,
+                                startYear: (_a = edu.startYear) !== null && _a !== void 0 ? _a : undefined,
+                                graduationYear: edu.graduationYear,
+                                description: edu.description,
+                            });
+                        }),
+                    }
+                    : {})
+            };
         }
         // Update certifications if provided
         if (certificationsProvided) {
-            updateData.certifications = Object.assign({ deleteMany: {} }, (validatedData.certifications && validatedData.certifications.length > 0
-                ? {
-                    create: validatedData.certifications.map((cert) => ({
-                        name: cert.name,
-                        issuer: cert.issuer,
-                        issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
-                    })),
-                }
-                : {}));
+            updateData.certifications = {
+                deleteMany: {},
+                ...(validatedData.certifications && validatedData.certifications.length > 0
+                    ? {
+                        create: validatedData.certifications.map((cert) => ({
+                            name: cert.name,
+                            issuer: cert.issuer,
+                            issueDate: cert.issueDate ? new Date(cert.issueDate) : null,
+                        })),
+                    }
+                    : {})
+            };
         }
         const updatedResume = await database_1.prisma.resume.update({
             where: { id: resumeId },
@@ -1400,15 +1502,22 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const _e = req.body, { template = 'colorful', language = 'en' } = _e, resumeData = __rest(_e, ["template", "language"]);
+        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
         const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
-        const validatedData = ResumeSchema.parse(Object.assign(Object.assign({}, resumeData), { language: normalizedLanguage }));
+        const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
         // Save the resume to database first
-        const resume = await (0, resumeService_1.createResume)(Object.assign(Object.assign({}, validatedData), { education: (validatedData.education || []).map((edu) => {
+        const resume = await (0, resumeService_1.createResume)({
+            ...validatedData,
+            education: (validatedData.education || []).map((edu) => {
                 var _a;
-                return (Object.assign(Object.assign({}, edu), { startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined }));
-            }), userId }));
+                return ({
+                    ...edu,
+                    startYear: (_a = edu === null || edu === void 0 ? void 0 : edu.startYear) !== null && _a !== void 0 ? _a : undefined,
+                });
+            }),
+            userId
+        });
         const outputData = languageProvided
             ? await translateResumeContent(validatedData, normalizedLanguage)
             : validatedData;
@@ -1458,7 +1567,7 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_f) { }
+            catch (_e) { }
         }
         const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
@@ -1466,10 +1575,17 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
         const executablePath = await resolveChromeExecutablePath(puppeteer);
         const launchOptions = {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--font-render-hinting=none'
+            ]
         };
         if (executablePath)
             launchOptions.executablePath = executablePath;
+        console.log('Launching Puppeteer with options:', JSON.stringify({ ...launchOptions, executablePath: 'REDACTED' }));
         const browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
         // Set content and wait for rendering
@@ -1493,6 +1609,7 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
         res.end(pdf);
     }
     catch (error) {
+        console.error('PDF Generation Error:', error);
         if (error instanceof zod_1.z.ZodError) {
             (0, errorHandling_1.handleValidationError)(error, res);
         }
@@ -1582,10 +1699,17 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
         const executablePath = await resolveChromeExecutablePath(puppeteer);
         const launchOptions2 = {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--font-render-hinting=none'
+            ]
         };
         if (executablePath)
             launchOptions2.executablePath = executablePath;
+        console.log('Launching Puppeteer (HTML-PDF) with options:', JSON.stringify({ ...launchOptions2, executablePath: 'REDACTED' }));
         const browser = await puppeteer.launch(launchOptions2);
         const page = await browser.newPage();
         // Set content and wait for rendering
@@ -1610,7 +1734,11 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
     }
     catch (error) {
         console.error('Error in HTML PDF endpoint:', error);
-        res.status(500).json({ error: 'Failed to generate HTML PDF' });
+        // Include error message in response for better debugging in prod
+        res.status(500).json({
+            error: 'Failed to generate HTML PDF',
+            details: error instanceof Error ? error.message : String(error)
+        });
     }
 }));
 // POST /api/resumes/upload
@@ -1639,7 +1767,10 @@ router.post('/upload', auth_1.ensureAuthenticated, upload.single('file'), (0, as
         }
         // Upload file
         const uploadResponse = await axios_1.default.post('https://api.openai.com/v1/files', formData, {
-            headers: Object.assign(Object.assign({}, formData.getHeaders()), { 'Authorization': `Bearer ${openaiApiKey}` }),
+            headers: {
+                ...formData.getHeaders(),
+                'Authorization': `Bearer ${openaiApiKey}`,
+            },
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
         });

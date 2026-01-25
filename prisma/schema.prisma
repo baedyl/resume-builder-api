@@ -9,7 +9,7 @@ generator client {
 
 model Resume {
   id             Int              @id @default(autoincrement())
-  userId         String          
+  userId         String
   fullName       String
   email          String
   phone          String?
@@ -22,6 +22,7 @@ model Resume {
   skills         Skill[]          // Implicit many-to-many
   languages      Language[]       // Implicit many-to-many
   certifications Certification[]
+  jobApplications JobApplication[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -58,11 +59,12 @@ model Education {
 }
 
 model Skill {
-  id        Int           @id @default(autoincrement())
-  name      String        @unique
-  resumes   Resume[]      // Implicit many-to-many
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id              Int                  @id @default(autoincrement())
+  name            String               @unique
+  resumes         Resume[]             // Implicit many-to-many
+  jobOpportunities JobOpportunitySkill[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 }
 
 model Language {
@@ -132,4 +134,84 @@ model User {
   subscriptionEnd   DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+model JobSource {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  displayName String
+  baseUrl     String?
+  apiKey      String?
+  isActive    Boolean  @default(true)
+  lastSync    DateTime?
+  syncInterval Int     @default(3600) // seconds between syncs
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model JobOpportunity {
+  id              Int                  @id @default(autoincrement())
+  title           String
+  company         String
+  companyLogo     String?
+  description     String
+  requirements    String?
+  location        String
+  locationType    String?              // remote, hybrid, onsite
+  salaryMin       Float?
+  salaryMax       Float?
+  currency        String               @default("USD")
+  jobType         String?              // full-time, part-time, contract
+  experienceLevel String?              // entry, mid, senior, executive
+  applicationUrl  String?
+  applicationEmail String?
+  // Job source tracking
+  source          String               // "jsearch", "indeed", etc.
+  sourceId        String               // Original job ID from source
+  sourceUrl       String               // Original job posting URL
+  postedDate      DateTime?
+  lastSynced      DateTime             @default(now())
+  isActive        Boolean              @default(true)
+  skills          JobOpportunitySkill[]
+  applications    JobApplication[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([source, sourceId])
+  @@index([title])
+  @@index([company])
+  @@index([location])
+  @@index([postedDate])
+  @@index([isActive])
+  @@index([source])
+}
+
+model JobOpportunitySkill {
+  id              Int            @id @default(autoincrement())
+  jobOpportunityId Int
+  jobOpportunity  JobOpportunity @relation(fields: [jobOpportunityId], references: [id], onDelete: Cascade)
+  skillId         Int
+  skill           Skill          @relation(fields: [skillId], references: [id])
+  isRequired      Boolean        @default(false)
+
+  @@unique([jobOpportunityId, skillId])
+  @@index([skillId])
+}
+
+model JobApplication {
+  id                Int            @id @default(autoincrement())
+  userId            String
+  jobOpportunityId  Int
+  jobOpportunity    JobOpportunity @relation(fields: [jobOpportunityId], references: [id], onDelete: Cascade)
+  status            String         @default("applied") // applied, reviewed, interviewed, rejected, accepted
+  coverLetter       String?
+  resumeId          Int?
+  resume            Resume?        @relation(fields: [resumeId], references: [id])
+  appliedAt         DateTime       @default(now())
+  notes             String?
+
+  @@unique([userId, jobOpportunityId])
+  @@index([userId])
+  @@index([status])
+  @@index([appliedAt])
 }
