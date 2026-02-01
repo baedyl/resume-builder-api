@@ -5,11 +5,9 @@ import { asyncHandler } from '../utils/asyncHandler';
 const router = express.Router();
 
 // POST /api/auth/linkedin/import
-// Mounted at /api/auth
-router.post('/linkedin/import', asyncHandler(async (req: any, res) => {
+// Mounted at /api/auth/linkedin
+router.post('/import', asyncHandler(async (req: any, res) => {
     const { code, redirectUri } = req.body;
-
-    console.log('Received LinkedIn import request:', { code: !!code, redirectUri });
 
     if (!code || !redirectUri) {
         return res.status(400).json({ error: 'Missing code or redirectUri' });

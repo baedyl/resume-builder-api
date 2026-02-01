@@ -59,7 +59,11 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
         showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0,
         headline: data.title || data.profession || data.role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
         languagesLine: (data.languages || [])
-            .map(l => `${l.name}: ${l.proficiency}`)
+            .map(l => {
+            const name = (0, language_1.localizeLanguageName)((l.name || '').trim(), language);
+            const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
+            return `${capitalizedName}: ${l.proficiency}`;
+        })
             .join(', '),
         skillsLine: (data.skills || [])
             .map(s => s.name)
@@ -102,7 +106,8 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
             });
         }),
         languages: data.languages.map(l => {
-            const name = (0, language_1.localizeLanguageName)(l.name, language);
+            const localized = (0, language_1.localizeLanguageName)((l.name || '').trim(), language);
+            const name = localized.charAt(0).toUpperCase() + localized.slice(1);
             const proficiency = (0, language_1.localizeProficiency)(l.proficiency, language);
             const processed = processLanguageProficiency({ name, proficiency });
             return {
