@@ -125,7 +125,17 @@ export const LANGUAGE_CONFIG = {
 export function localizeProficiency(label: string, languageCode: string = 'en'): string {
     const config = getLanguageConfig(languageCode);
     const map = (config as any).proficiencyMap || {};
-    return map[label] || label;
+    
+    // Try exact match
+    if (map[label]) return map[label];
+    
+    // Try case-insensitive match
+    const lowerLabel = label.toLowerCase();
+    const key = Object.keys(map).find(k => k.toLowerCase() === lowerLabel);
+    if (key) return map[key];
+    
+    // Fallback: capitalize the first letter
+    return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 export function localizeLanguageName(name: string, languageCode: string = 'en'): string {

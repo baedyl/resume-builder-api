@@ -94,7 +94,11 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
     showCertifications: Array.isArray(data.certifications) && data.certifications.length > 0,
     headline: (data as any).title || (data as any).profession || (data as any).role || (data.workExperience && data.workExperience[0] && data.workExperience[0].jobTitle) || undefined,
     languagesLine: (data.languages || [])
-      .map(l => `${l.name}: ${l.proficiency}`)
+      .map(l => {
+        const name = localizeLanguageName((l.name || '').trim(), language);
+        const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
+        return `${capitalizedName}: ${l.proficiency}`;
+      })
       .join(', '),
     skillsLine: (data.skills || [])
       .map(s => s.name)
@@ -132,7 +136,8 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
       graduationYear: edu.graduationYear?.toString()
     })),
     languages: data.languages.map(l => {
-      const name = localizeLanguageName(l.name, language);
+      const localized = localizeLanguageName((l.name || '').trim(), language);
+      const name = localized.charAt(0).toUpperCase() + localized.slice(1);
       const proficiency = localizeProficiency(l.proficiency, language);
       const processed = processLanguageProficiency({ name, proficiency });
       return {

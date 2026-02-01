@@ -159,7 +159,16 @@ exports.LANGUAGE_CONFIG = {
 function localizeProficiency(label, languageCode = 'en') {
     const config = getLanguageConfig(languageCode);
     const map = config.proficiencyMap || {};
-    return map[label] || label;
+    // Try exact match
+    if (map[label])
+        return map[label];
+    // Try case-insensitive match
+    const lowerLabel = label.toLowerCase();
+    const key = Object.keys(map).find(k => k.toLowerCase() === lowerLabel);
+    if (key)
+        return map[key];
+    // Fallback: capitalize the first letter
+    return label.charAt(0).toUpperCase() + label.slice(1);
 }
 function localizeLanguageName(name, languageCode = 'en') {
     const lower = (name || '').toLowerCase();

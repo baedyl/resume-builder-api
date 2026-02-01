@@ -1,60 +1,77 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+import express from 'express';
+import axios from 'axios';
+import { asyncHandler } from '../utils/asyncHandler';
 
-// JWKS client setup
-const client = jwksClient({
-  jwksUri: `https://${process.env.AUTH0_DOMAIN}/.well-known/jwks.json`
-});
+const router = express.Router();
 
-// CustomRequest interface
-interface CustomRequest extends Request {
-  user?: {
-    sub: string;
-  };
-}
+// POST /api/auth/linkedin/import
+// Mounted at /api/auth
+router.post('/linkedin/import', asyncHandler(async (req: any, res) => {
+    const { code, redirectUri, accessToken: providedAccessToken } = req.body;
 
-// Get signing key
-const getKey = (header: jwt.JwtHeader, callback: jwt.SigningKeyCallback): void => {
-  client.getSigningKey(header.kid, (err, key) => {
-    if (err || !key) {
-      callback(new Error('Signing key not found'), undefined);
-    } else {
-      const signingKey = key.getPublicKey();
-      callback(null, signingKey);
+    console.log('Received LinkedIn import request:', { 
+        hasCode: !!code, 
+        redirectUri,
+        hasAccessToken: !!providedAccessToken 
+    });
+
+    if (!providedAccessToken && (!code || !redirectUri)) {
+        return res.status(400).json({ error: 'Missing code and redirectUri, or accessToken' });
     }
-  });
-};
 
-// Middleware
-export const ensureAuthenticated = (
-  req: any,
-  res: Response,
-  next: NextFunction
-): void => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  jwt.verify(
-    token,
-    getKey,
-    {
-      audience: process.env.AUTH0_AUDIENCE,
-      issuer: `https://${process.env.AUTH0_DOMAIN}/`,
-      algorithms: ['RS256']
-    },
-    (err, decoded) => {
-      if (err) {
-        res.status(401).json({ error: 'Invalid token' });
-      } else {
-        req.user = decoded as { sub: string };
-        next();
-      }
+    if (!providedAccessToken && (!process.env.LINKEDIN_CLIENT_ID || !process.env.LINKEDIN_CLIENT_SECRET)) {
+        console.error('LinkedIn credentials missing in environment variables');
+        return res.status(500).json({ error: 'Server configuration error: LinkedIn credentials missing' });
     }
-  );
-};
+
+    try {
+        let accessToken = providedAccessToken;
+
+        if (!accessToken) {
+            // 1. Exchange code for access token
+            console.log(`Exchanging LinkedIn code for token. ClientID: ${process.env.LINKEDIN_CLIENT_ID}, RedirectURI: ${redirectUri}`);
+            const tokenResponse = await axios.post('https://www.linkedin.com/oauth/v2/accessToken', null, {
+                params: {
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: redirectUri,
+                    client_id: process.env.LINKEDIN_CLIENT_ID,
+                    client_secret: process.env.LINKEDIN_CLIENT_SECRET
+                },
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+            
+            console.log('LinkedIn token exchange successful');
+            accessToken = tokenResponse.data.access_token;
+        }
+
+        // 2. Get User Info (OpenID Connect)
+        console.log('Fetching LinkedIn user info...');
+        const userInfoResponse = await axios.get('https://api.linkedin.com/v2/userinfo', {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
+
+        console.log('LinkedIn user info fetched successfully');
+
+        // 3. Return profile data
+        res.json(userInfoResponse.data);
+
+    } catch (error: any) {
+        console.error('LinkedIn Import Error:', error.response?.data || error.message);
+        
+        const status = error.response?.status || 500;
+        const data = error.response?.data || {};
+        
+        res.status(status).json({ 
+            error: 'Failed to import LinkedIn profile',
+            details: data,
+            message: error.message
+        });
+    }
+}));
+
+export default router;

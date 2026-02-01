@@ -6,6 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // Load environment variables first
 const dotenv_1 = __importDefault(require("dotenv"));
 dotenv_1.default.config();
+// Polyfill ReadableStream for Puppeteer in environments where it might be missing
+const web_1 = require("stream/web");
+if (!global.ReadableStream) {
+    global.ReadableStream = web_1.ReadableStream;
+}
 // Polyfill fetch for Node 16
 if (!global.fetch) {
     const nodeFetch = require('node-fetch');
@@ -22,7 +27,8 @@ const coverLetter_1 = __importDefault(require("./routes/coverLetter"));
 const job_1 = __importDefault(require("./routes/job"));
 const jobOpportunity_1 = __importDefault(require("./routes/jobOpportunity"));
 const stripe_1 = __importDefault(require("./routes/stripe"));
-const auth_1 = require("./middleware/auth"); // Adjust path as needed
+const auth_1 = __importDefault(require("./routes/auth"));
+const auth_2 = require("./middleware/auth"); // Adjust path as needed
 const jobScheduler_1 = require("./services/jobScheduler");
 const app = express();
 // Configure CORS for your frontend origins
@@ -54,12 +60,13 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, 
 // Now add JSON parsing for other routes
 app.use(express.json());
 // Protect API routes with authentication middleware
-app.use('/api/resumes', auth_1.ensureAuthenticated, resume_1.default);
+app.use('/api/resumes', auth_2.ensureAuthenticated, resume_1.default);
 app.use('/api/skills', skill_1.default);
 app.use('/api/cover-letter', coverLetter_1.default);
 app.use('/api/jobs', job_1.default);
 app.use('/api/job-opportunities', jobOpportunity_1.default);
 app.use('/api/stripe', stripe_1.default);
+app.use('/api/auth', auth_1.default);
 // Start job scheduler
 jobScheduler_1.JobScheduler.start();
 const server = app.listen(3000, () => console.log('Server running on port 3000'));

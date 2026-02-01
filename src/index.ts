@@ -2,6 +2,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Polyfill ReadableStream for Puppeteer in environments where it might be missing
+import { ReadableStream } from 'stream/web';
+if (!global.ReadableStream) {
+    (global as any).ReadableStream = ReadableStream;
+}
+
 // Polyfill fetch for Node 16
 if (!global.fetch) {
     const nodeFetch = require('node-fetch');
@@ -19,6 +25,7 @@ import coverLetterRouter from './routes/coverLetter';
 import jobRouter from './routes/job';
 import jobOpportunityRouter from './routes/jobOpportunity';
 import stripeRouter from './routes/stripe';
+import authRouter from './routes/auth';
 import { ensureAuthenticated } from './middleware/auth'; // Adjust path as needed
 import { JobScheduler } from './services/jobScheduler';
 
@@ -63,6 +70,7 @@ app.use('/api/cover-letter', coverLetterRouter);
 app.use('/api/jobs', jobRouter);
 app.use('/api/job-opportunities', jobOpportunityRouter);
 app.use('/api/stripe', stripeRouter);
+app.use('/api/auth', authRouter);
 
 // Start job scheduler
 JobScheduler.start();
