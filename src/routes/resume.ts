@@ -1742,13 +1742,32 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         // environment-dependent differences between preview and generated PDF.)
         await page.emulateMediaType('print');
 
-        // Force A4 and remove any implicit page margins.
-        // Some environments apply default print margins unless @page is explicitly defined.
-        await page.addStyleTag({ content: '@page { size: A4; margin: 0; }' });
-        
-        // Generate PDF
+        // If the rendered content spans multiple pages, add a small top padding to pages 2+.
+        // Requirement: add 12px top padding when resume is longer than one page.
+        // IMPORTANT: preserve existing left/right/bottom spacing.
+        const chosenScale = (template as string) === 'minimal' ? 0.97 : 1;
+        const a4PageHeightPx = 1123; // 297mm @ 96dpi ≈ 1122.52px
+        // Use globalThis to avoid requiring DOM typings in the Node/TS compilation context.
+        const documentHeightPx = await page.evaluate(() => (globalThis as any).document.documentElement.scrollHeight);
+        const estimatedPages = Math.ceil((documentHeightPx * chosenScale) / a4PageHeightPx);
+
         const noMarginTemplates = ['minimal', 'modern', 'colorful'];
         const useMinimalMargins = noMarginTemplates.includes(template as string);
+        const baseMargin = useMinimalMargins ? '0mm' : '20mm';
+
+        if (estimatedPages > 1) {
+            // Apply 12px only to pages after the first.
+            // Use calc() so we keep the original top margin and add the padding.
+            const plusTop = baseMargin === '0mm' ? '12px' : `calc(${baseMargin} + 12px)`;
+            await page.addStyleTag({
+                content: `@page { size: A4; margin: ${plusTop} ${baseMargin} ${baseMargin} ${baseMargin}; }\n@page :first { size: A4; margin: ${baseMargin} ${baseMargin} ${baseMargin} ${baseMargin}; }`
+            });
+        } else {
+            // Keep size consistent without overriding margins.
+            await page.addStyleTag({ content: '@page { size: A4; }' });
+        }
+        
+        // Generate PDF
 
         const pdf = await page.pdf({
             format: 'A4',
@@ -1756,7 +1775,7 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             preferCSSPageSize: true,
             // Slightly scale down templates that are designed for on-screen preview so they don't
             // spill onto a 2nd page due to font/rendering differences.
-            scale: (template as string) === 'minimal' ? 0.97 : 1,
+            scale: chosenScale,
             margin: useMinimalMargins ? {
                 top: '0mm',
                 right: '0mm',
@@ -1913,18 +1932,35 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         // Ensure print CSS is applied when rendering to PDF.
         await page.emulateMediaType('print');
 
-        // Force A4 and remove any implicit page margins.
-        await page.addStyleTag({ content: '@page { size: A4; margin: 0; }' });
-        
-        // Generate PDF
+        // If the rendered content spans multiple pages, add a small top padding to pages 2+.
+        // Requirement: add 12px top padding when resume is longer than one page.
+        // IMPORTANT: preserve existing left/right/bottom spacing.
+        const chosenScale = (template as string) === 'minimal' ? 0.97 : 1;
+        const a4PageHeightPx = 1123; // 297mm @ 96dpi ≈ 1122.52px
+        // Use globalThis to avoid requiring DOM typings in the Node/TS compilation context.
+        const documentHeightPx = await page.evaluate(() => (globalThis as any).document.documentElement.scrollHeight);
+        const estimatedPages = Math.ceil((documentHeightPx * chosenScale) / a4PageHeightPx);
+
         const noMarginTemplates = ['minimal', 'modern', 'colorful'];
         const useMinimalMargins = noMarginTemplates.includes(template as string);
+        const baseMargin = useMinimalMargins ? '0mm' : '20mm';
+
+        if (estimatedPages > 1) {
+            const plusTop = baseMargin === '0mm' ? '12px' : `calc(${baseMargin} + 12px)`;
+            await page.addStyleTag({
+                content: `@page { size: A4; margin: ${plusTop} ${baseMargin} ${baseMargin} ${baseMargin}; }\n@page :first { size: A4; margin: ${baseMargin} ${baseMargin} ${baseMargin} ${baseMargin}; }`
+            });
+        } else {
+            await page.addStyleTag({ content: '@page { size: A4; }' });
+        }
+        
+        // Generate PDF
 
         const pdf = await page.pdf({
             format: 'A4',
             printBackground: true,
             preferCSSPageSize: true,
-            scale: (template as string) === 'minimal' ? 0.97 : 1,
+            scale: chosenScale,
             margin: useMinimalMargins ? {
                 top: '0mm',
                 right: '0mm',
