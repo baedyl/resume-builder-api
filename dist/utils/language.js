@@ -159,16 +159,20 @@ exports.LANGUAGE_CONFIG = {
 function localizeProficiency(label, languageCode = 'en') {
     const config = getLanguageConfig(languageCode);
     const map = config.proficiencyMap || {};
+    // Normalize input (DB/user content sometimes includes trailing spaces or inconsistent casing)
+    const normalizedLabel = (label || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedLabel)
+        return '';
     // Try exact match
-    if (map[label])
-        return map[label];
+    if (map[normalizedLabel])
+        return map[normalizedLabel];
     // Try case-insensitive match
-    const lowerLabel = label.toLowerCase();
+    const lowerLabel = normalizedLabel.toLowerCase();
     const key = Object.keys(map).find(k => k.toLowerCase() === lowerLabel);
     if (key)
         return map[key];
     // Fallback: capitalize the first letter
-    return label.charAt(0).toUpperCase() + label.slice(1);
+    return normalizedLabel.charAt(0).toUpperCase() + normalizedLabel.slice(1);
 }
 function localizeLanguageName(name, languageCode = 'en') {
     const lower = (name || '').toLowerCase();

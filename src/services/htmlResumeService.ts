@@ -97,7 +97,8 @@ export function generateHTMLResume(data: ResumeData, templateName: string = 'col
       .map(l => {
         const name = localizeLanguageName((l.name || '').trim(), language);
         const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
-        return `${capitalizedName}: ${l.proficiency}`;
+        const proficiency = localizeProficiency((l.proficiency || '').trim(), language);
+        return `${capitalizedName}: ${proficiency}`;
       })
       .join(', '),
     skillsLine: (data.skills || [])

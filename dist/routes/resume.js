@@ -1495,15 +1495,29 @@ router.post('/:id/html', auth_1.ensureAuthenticated, (0, asyncHandler_1.asyncHan
 }));
 // POST /api/resumes/save-and-html-pdf - Save new resume and return PDF from HTML template
 router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
             return;
         }
-        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        // NOTE: Frontend preview uses query params (`/html?template=minimal`).
+        // Some clients also pass template/language in query for this POST endpoint.
+        // Support both body + query to avoid silently falling back to defaults.
+        const template = (typeof ((_b = req.body) === null || _b === void 0 ? void 0 : _b.template) === 'string' && req.body.template.trim().length > 0)
+            ? req.body.template
+            : ((typeof ((_c = req.query) === null || _c === void 0 ? void 0 : _c.template) === 'string' && req.query.template.trim().length > 0)
+                ? req.query.template
+                : 'colorful');
+        const language = (typeof ((_d = req.body) === null || _d === void 0 ? void 0 : _d.language) === 'string' && req.body.language.trim().length > 0)
+            ? req.body.language
+            : ((typeof ((_e = req.query) === null || _e === void 0 ? void 0 : _e.language) === 'string' && req.query.language.trim().length > 0)
+                ? req.query.language
+                : 'en');
+        const { template: _t, language: _l, ...resumeData } = req.body;
+        const languageProvided = (typeof ((_f = req.body) === null || _f === void 0 ? void 0 : _f.language) === 'string' && req.body.language.trim().length > 0)
+            || (typeof ((_g = req.query) === null || _g === void 0 ? void 0 : _g.language) === 'string' && req.query.language.trim().length > 0);
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
         const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
         // Save the resume to database first
@@ -1547,7 +1561,7 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })),
-            skills: ((_b = outputData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
+            skills: ((_h = outputData.skills) === null || _h === void 0 ? void 0 : _h.map((skill) => ({ name: skill.name }))) || [],
             languages: outputData.languages || [],
             certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
@@ -1560,15 +1574,16 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
         let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
         if (!languageProvided) {
             try {
-                const basis = (validatedData.summary || '') || (((_d = (_c = validatedData.workExperience) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
+                const basis = (validatedData.summary || '') || (((_k = (_j = validatedData.workExperience) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.description) || '');
                 if (basis) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_e) { }
+            catch (_m) { }
         }
+        console.log('save-and-html-pdf using template:', template, 'language:', effectiveLanguage);
         const html = (0, htmlResumeService_1.generateHTMLResume)(htmlResumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
@@ -1590,11 +1605,47 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
         const page = await browser.newPage();
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
+        // Ensure print CSS is applied when rendering to PDF.
+        // (Chromium usually does this automatically for page.pdf(), but making it explicit avoids
+        // environment-dependent differences between preview and generated PDF.)
+        await page.emulateMediaType('print');
+        // If the rendered content spans multiple pages, add a small top padding to pages 2+.
+        // Requirement: add 12px top padding when resume is longer than one page.
+        // IMPORTANT: preserve existing left/right/bottom spacing.
+        const chosenScale = template === 'minimal' ? 0.97 : 1;
+        const a4PageHeightPx = 1123; // 297mm @ 96dpi ≈ 1122.52px
+        // Use globalThis to avoid requiring DOM typings in the Node/TS compilation context.
+        const documentHeightPx = await page.evaluate(() => globalThis.document.documentElement.scrollHeight);
+        const estimatedPages = Math.ceil((documentHeightPx * chosenScale) / a4PageHeightPx);
+        const noMarginTemplates = ['minimal', 'modern', 'colorful'];
+        const useMinimalMargins = noMarginTemplates.includes(template);
+        const baseMargin = useMinimalMargins ? '0mm' : '20mm';
+        if (estimatedPages > 1) {
+            // Apply 12px only to pages after the first.
+            // Use calc() so we keep the original top margin and add the padding.
+            const plusTop = baseMargin === '0mm' ? '12px' : `calc(${baseMargin} + 12px)`;
+            await page.addStyleTag({
+                content: `@page { size: A4; margin: ${plusTop} ${baseMargin} ${baseMargin} ${baseMargin}; }\n@page :first { size: A4; margin: ${baseMargin} ${baseMargin} ${baseMargin} ${baseMargin}; }`
+            });
+        }
+        else {
+            // Keep size consistent without overriding margins.
+            await page.addStyleTag({ content: '@page { size: A4; }' });
+        }
         // Generate PDF
         const pdf = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: {
+            preferCSSPageSize: true,
+            // Slightly scale down templates that are designed for on-screen preview so they don't
+            // spill onto a 2nd page due to font/rendering differences.
+            scale: chosenScale,
+            margin: useMinimalMargins ? {
+                top: '0mm',
+                right: '0mm',
+                bottom: '0mm',
+                left: '0mm'
+            } : {
                 top: '20mm',
                 right: '20mm',
                 bottom: '20mm',
@@ -1620,14 +1671,25 @@ router.post('/save-and-html-pdf', auth_1.ensureAuthenticated, subscription_1.wit
 }));
 // POST /api/resumes/:id/html-pdf - Convert existing resume to PDF using HTML template
 router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPremiumFeatures, (0, asyncHandler_1.asyncHandler)(async (req, res) => {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'colorful', language = 'en' } = req.body;
-        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language')
-            && typeof req.body.language === 'string'
-            && req.body.language.trim().length > 0;
+        // NOTE: HTML preview endpoint takes query params (`/html?template=minimal`).
+        // Some clients mistakenly send `/html-pdf?template=minimal` without including it in the POST body.
+        // Support both to ensure the selected template is actually used.
+        const template = (typeof ((_b = req.body) === null || _b === void 0 ? void 0 : _b.template) === 'string' && req.body.template.trim().length > 0)
+            ? req.body.template
+            : ((typeof ((_c = req.query) === null || _c === void 0 ? void 0 : _c.template) === 'string' && req.query.template.trim().length > 0)
+                ? req.query.template
+                : 'colorful');
+        const language = (typeof ((_d = req.body) === null || _d === void 0 ? void 0 : _d.language) === 'string' && req.body.language.trim().length > 0)
+            ? req.body.language
+            : ((typeof ((_e = req.query) === null || _e === void 0 ? void 0 : _e.language) === 'string' && req.query.language.trim().length > 0)
+                ? req.query.language
+                : 'en');
+        const languageProvided = (typeof ((_f = req.body) === null || _f === void 0 ? void 0 : _f.language) === 'string' && req.body.language.trim().length > 0)
+            || (typeof ((_g = req.query) === null || _g === void 0 ? void 0 : _g.language) === 'string' && req.query.language.trim().length > 0);
         const normalizedLanguage = (0, language_1.normalizeLanguageCode)(typeof language === 'string' ? language : undefined);
         if (!userId) {
             (0, errorHandling_1.handleUnauthorized)(res);
@@ -1671,7 +1733,7 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
                 graduationYear: edu.graduationYear,
                 description: edu.description,
             })) || [],
-            skills: ((_b = outputData.skills) === null || _b === void 0 ? void 0 : _b.map((skill) => ({ name: skill.name }))) || [],
+            skills: ((_h = outputData.skills) === null || _h === void 0 ? void 0 : _h.map((skill) => ({ name: skill.name }))) || [],
             languages: outputData.languages || [],
             certifications: (outputData.certifications || []).map((cert) => ({
                 name: cert.name,
@@ -1684,15 +1746,16 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
         let effectiveLanguage = languageProvided ? normalizedLanguage : 'en';
         if (!languageProvided) {
             try {
-                const basis = (resume.summary || '') || (((_d = (_c = resume.workExperiences) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.description) || '');
+                const basis = (resume.summary || '') || (((_k = (_j = resume.workExperiences) === null || _j === void 0 ? void 0 : _j[0]) === null || _k === void 0 ? void 0 : _k.description) || '');
                 if (basis) {
                     const detected = await (0, language_1.detectLanguage)(basis);
                     if (detected === null || detected === void 0 ? void 0 : detected.code)
                         effectiveLanguage = detected.code;
                 }
             }
-            catch (_e) { }
+            catch (_m) { }
         }
+        console.log('html-pdf using template:', template, 'language:', effectiveLanguage);
         const html = (0, htmlResumeService_1.generateHTMLResume)(resumeData, template, effectiveLanguage);
         // Convert HTML to PDF using Puppeteer
         const puppeteer = require('puppeteer');
@@ -1714,11 +1777,40 @@ router.post('/:id/html-pdf', auth_1.ensureAuthenticated, subscription_1.withPrem
         const page = await browser.newPage();
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
+        // Ensure print CSS is applied when rendering to PDF.
+        await page.emulateMediaType('print');
+        // If the rendered content spans multiple pages, add a small top padding to pages 2+.
+        // Requirement: add 12px top padding when resume is longer than one page.
+        // IMPORTANT: preserve existing left/right/bottom spacing.
+        const chosenScale = template === 'minimal' ? 0.97 : 1;
+        const a4PageHeightPx = 1123; // 297mm @ 96dpi ≈ 1122.52px
+        // Use globalThis to avoid requiring DOM typings in the Node/TS compilation context.
+        const documentHeightPx = await page.evaluate(() => globalThis.document.documentElement.scrollHeight);
+        const estimatedPages = Math.ceil((documentHeightPx * chosenScale) / a4PageHeightPx);
+        const noMarginTemplates = ['minimal', 'modern', 'colorful'];
+        const useMinimalMargins = noMarginTemplates.includes(template);
+        const baseMargin = useMinimalMargins ? '0mm' : '20mm';
+        if (estimatedPages > 1) {
+            const plusTop = baseMargin === '0mm' ? '12px' : `calc(${baseMargin} + 12px)`;
+            await page.addStyleTag({
+                content: `@page { size: A4; margin: ${plusTop} ${baseMargin} ${baseMargin} ${baseMargin}; }\n@page :first { size: A4; margin: ${baseMargin} ${baseMargin} ${baseMargin} ${baseMargin}; }`
+            });
+        }
+        else {
+            await page.addStyleTag({ content: '@page { size: A4; }' });
+        }
         // Generate PDF
         const pdf = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: {
+            preferCSSPageSize: true,
+            scale: chosenScale,
+            margin: useMinimalMargins ? {
+                top: '0mm',
+                right: '0mm',
+                bottom: '0mm',
+                left: '0mm'
+            } : {
                 top: '20mm',
                 right: '20mm',
                 bottom: '20mm',
