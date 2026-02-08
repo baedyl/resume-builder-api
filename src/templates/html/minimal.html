@@ -5,32 +5,41 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{fullName}} - Resume</title>
   <style>
+    @page { margin: 15mm; size: A4; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.5; font-size: 13px; }
-    .container { max-width: 800px; margin: 0 auto; padding: 0; }
-    .header { text-align: center; margin-bottom: 12px; }
-    .name { font-size: 24px; font-weight: bold; }
-    .headline { font-size: 13px; margin-top: 4px; }
-    .meta { font-size: 12px; margin-top: 8px; }
-    .meta span { margin: 0 6px; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; line-height: 1.3; font-size: 10pt; }
+    .container { width: 100%; max-width: 190mm; margin: 0 auto; padding: 0; }
+    .header { text-align: center; margin-top: 6pt; margin-bottom: 4pt; }
+    .name { font-size: 24pt; font-weight: bold; line-height: 1.2; }
+    .headline { font-size: 12pt; margin-top: 4pt; }
+    .meta { font-size: 10pt; margin-top: 4pt; }
+    .meta span { margin: 0 4pt; }
     .meta span:not(:last-child)::after { content: " | "; }
-    .rule { border-top: 1px solid #000; margin: 10px 0 16px; }
-    .section { margin-bottom: 16px; }
-    .section-title { font-weight: bold; margin-bottom: 6px; }
-    .exp-entry { margin-bottom: 12px; }
-    .exp-head { display: flex; justify-content: space-between; align-items: baseline; }
-    .job { font-weight: bold; font-size: 13px; }
-    .company { font-size: 12px; font-weight: bold; }
-    .dates { font-size: 12px; font-weight: bold; }
-    .task { font-size: 12px; margin-left: 14px; }
+    .rule { border-top: 1px solid #000; margin: 4pt 0 12pt; }
+    .section { margin-bottom: 12px; break-inside: auto; page-break-inside: auto; }
+    .section-title { font-weight: bold; margin-bottom: 4pt; font-size: 11pt; text-transform: uppercase; }
+    .exp-entry { margin-bottom: 1.5rem; break-inside: avoid; page-break-inside: avoid; }
+    .exp-header-row { display: flex !important; justify-content: space-between !important; align-items: flex-start !important; width: 100%; }
+    .job { font-weight: bold; font-size: 10pt; }
+    .company { font-size: 10pt; font-weight: bold; margin: 0; }
+    .dates { font-size: 10pt; font-weight: bold; white-space: nowrap; text-align: right; margin-left: 20px; }
+    .task { font-size: 10pt; margin-left: 12pt; margin-bottom: 4pt; line-height: 1.15; }
     .task::before { content: '\2022\00A0'; }
-    .summary-text { font-size: 12px; }
-    .skills-line { font-size: 12px; }
-    .languages-line { font-size: 12px; }
+    .summary-text { font-size: 10pt; text-align: justify; hyphens: auto; margin-bottom: 12px; line-height: 1.2; }
+    .skills-container { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; line-height: 1.2; }
+    .skill-item { font-size: 10pt; }
+    .languages-line { font-size: 10pt; }
+    
+    /* Ensure bullet points stay with content */
+    ul { margin: 0; padding-left: 12pt; list-style: none; }
+    li { page-break-inside: avoid; margin-bottom: 4px; line-height: 1.15; }
+
     @media print {
-        body { -webkit-print-color-adjust: exact; }
-        .section { margin-bottom: 12px !important; break-inside: avoid; }
-        .exp-entry { margin-bottom: 8px !important; break-inside: avoid; }
+        @page { size: A4; margin: 20mm 15mm; }
+        body { -webkit-print-color-adjust: exact; width: 100%; margin: 0; padding: 0; }
+        .section { break-inside: auto; }
+        .exp-entry { break-inside: avoid; }
+        .first-on-page { margin-top: 0; }
     }
   </style>
 </head>
@@ -53,12 +62,16 @@
       <div class="summary-text">{{summary}}</div>
     </div>
 
-    {{#skillsLine}}
+    {{#skills.length}}
     <div class="section">
       <div class="section-title">{{titles.skills}}</div>
-      <div class="skills-line">{{skillsLine}}</div>
+      <div class="skills-container">
+        {{#skills}}
+        <div class="skill-item">{{name}}</div>
+        {{/skills}}
+      </div>
     </div>
-    {{/skillsLine}}
+    {{/skills.length}}
 
     {{#languagesLine}}
     <div class="section">
@@ -71,13 +84,11 @@
       <div class="section-title">{{titles.professionalExperience}}</div>
       {{#workExperience}}
       <div class="exp-entry">
-        <div class="exp-head">
-          <div>
-            <div class="job">{{jobTitle}}</div>
-            <div class="company">{{company}}{{#companyDescription}} | {{companyDescription}}{{/companyDescription}}</div>
-          </div>
+        <div class="exp-header-row">
+          <div class="job">{{jobTitle}}</div>
           <div class="dates">{{startDate}} – {{endDate}}</div>
         </div>
+        <div class="company">{{company}}{{#companyDescription}} | {{companyDescription}}{{/companyDescription}}</div>
         {{#tasks}}<div class="task">{{.}}</div>{{/tasks}}
         {{#techStack}}<div style="font-size:11px; margin-left:14px">{{labels.tech}}: {{techStack}}</div>{{/techStack}}
       </div>
@@ -88,29 +99,25 @@
       <div class="section-title">{{titles.education}}</div>
       {{#education}}
       <div class="exp-entry">
-        <div class="exp-head">
-          <div>
-            <div class="job">{{degree}}</div>
-            <div class="company">{{institution}}</div>
-          </div>
+        <div class="exp-header-row">
+          <div class="job">{{degree}}</div>
           <div class="dates">{{#startYear}}{{startYear}}{{#graduationYear}} – {{/graduationYear}}{{/startYear}}{{#graduationYear}}{{graduationYear}}{{/graduationYear}}</div>
         </div>
+        <div class="company">{{institution}}</div>
       </div>
       {{/education}}
     </div>
 
     {{#showCertifications}}
-    <div class="section">
+    <div class="section" style="margin-top: 0;">
       <div class="section-title">{{titles.certifications}}</div>
       {{#certifications}}
       <div class="exp-entry">
-        <div class="exp-head">
-          <div>
-            <div class="job">{{name}}</div>
-            {{#issuer}}<div class="company">{{issuer}}</div>{{/issuer}}
-          </div>
+        <div class="exp-header-row">
+          <div class="job">{{name}}</div>
           {{#issueDate}}<div class="dates">{{issueDate}}</div>{{/issueDate}}
         </div>
+        {{#issuer}}<div class="company">{{issuer}}</div>{{/issuer}}
       </div>
       {{/certifications}}
     </div>
@@ -118,4 +125,3 @@
   </div>
 </body>
 </html>
-

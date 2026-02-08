@@ -9,13 +9,22 @@ function generateMinimalTemplate(data, doc, language = 'en') {
   
   // Header
   doc.font('Helvetica-Bold')
-     .fontSize(20)
+     .fontSize(24)
      .fillColor(textColor)
-     .text(data.fullName, { align: 'left' });
+     .text(data.fullName, { align: 'center' });
   
+  if (data.headline) {
+    doc.moveDown(0.2);
+    doc.font('Helvetica')
+       .fontSize(13)
+       .fillColor(textColor)
+       .text(data.headline, { align: 'center' });
+  }
+
   // Contact information
+  doc.moveDown(0.2);
   doc.font('Helvetica')
-     .fontSize(11)
+     .fontSize(10) // Reduced from 12 to match "compact" request
      .fillColor(textColor);
   
   const contactInfo = [
@@ -26,19 +35,27 @@ function generateMinimalTemplate(data, doc, language = 'en') {
     data.website
   ].filter(Boolean).join(' | ');
   
-  doc.text(contactInfo);
-  doc.moveDown(1);
+  doc.text(contactInfo, { align: 'center' });
+  doc.moveDown(0.5);
+
+  // Add separator after Header
+  doc.strokeColor(textColor)
+     .lineWidth(1)
+     .moveTo(36, doc.y) // Adjusted for new margins (36)
+     .lineTo(576, doc.y) // Adjusted for new margins (612 - 36 = 576)
+     .stroke();
+  doc.moveDown(0.5); // Reduced from 1
   
   // Summary
   if (data.summary) {
     doc.font('Helvetica')
-       .fontSize(11)
+       .fontSize(10) // Reduced to 10 for better density
        .fillColor(textColor)
        .text(data.summary, {
          align: 'justify',
-         lineGap: 2
+         lineGap: 1.5 // Tighter line height
        });
-    doc.moveDown(1);
+    doc.moveDown(0.5); // Reduced from 1
   }
 
   // Skills
@@ -46,39 +63,42 @@ function generateMinimalTemplate(data, doc, language = 'en') {
     // Add separator before Skills section
     doc.strokeColor(textColor)
        .lineWidth(0.5)
-       .moveTo(50, doc.y)
-       .lineTo(545, doc.y)
+       .moveTo(36, doc.y)
+       .lineTo(576, doc.y)
        .stroke();
-    doc.moveDown(1);
+    doc.moveDown(0.5);
     
-    doc.font('Helvetica')
-       .fontSize(11)
+    doc.font('Helvetica-Bold') // Bold label
+       .fontSize(10)
        .fillColor(textColor)
-       .text(languageConfig.sections.skills + ': ' + data.skills.map(skill => skill.name).join(', '), {
-         lineGap: 2
+       .text(languageConfig.sections.skills + ': ', { continued: true });
+
+    doc.font('Helvetica')
+       .text(data.skills.map(skill => skill.name).join(', '), {
+         lineGap: 1.5
        });
-    doc.moveDown(1);
+    doc.moveDown(0.5);
   }
 
   // Languages
   if (data.languages.length > 0) {
-    doc.moveDown(1);
+    doc.moveDown(0.5);
     // Add separator before Languages section
     doc.strokeColor(textColor)
        .lineWidth(0.5)
-       .moveTo(50, doc.y)
-       .lineTo(545, doc.y)
+       .moveTo(36, doc.y)
+       .lineTo(576, doc.y)
        .stroke();
-    doc.moveDown(1);
-    
-    doc.font('Helvetica-Bold')
-       .fontSize(11)
-       .fillColor(textColor)
-       .text(languageConfig.sections.languages);
     doc.moveDown(0.5);
     
+    doc.font('Helvetica-Bold')
+       .fontSize(10)
+       .fillColor(textColor)
+       .text(languageConfig.sections.languages);
+    doc.moveDown(0.2);
+    
     doc.font('Helvetica')
-       .fontSize(11)
+       .fontSize(10)
        .fillColor(textColor);
     
     const { localizeLanguageName, localizeProficiency } = require('../utils/language');
@@ -86,7 +106,7 @@ function generateMinimalTemplate(data, doc, language = 'en') {
       const localizedName = localizeLanguageName(lang.name, language);
       const localizedProf = localizeProficiency(lang.proficiency, language);
       doc.text(`${localizedName} - ${localizedProf}`, {
-        lineGap: 2
+        lineGap: 1.5
       });
     });
   }
@@ -95,53 +115,57 @@ function generateMinimalTemplate(data, doc, language = 'en') {
   // Add separator before Experience section
   doc.strokeColor(textColor)
      .lineWidth(0.5)
-     .moveTo(50, doc.y)
-     .lineTo(545, doc.y)
+     .moveTo(36, doc.y)
+     .lineTo(576, doc.y)
      .stroke();
-  doc.moveDown(1);
+  doc.moveDown(0.5);
   
   doc.font('Helvetica-Bold')
-     .fontSize(11)
+     .fontSize(10)
      .fillColor(textColor)
      .text(languageConfig.sections.professionalExperience);
-  doc.moveDown(0.5);
+  doc.moveDown(0.2);
   doc.font('Helvetica');
   
   data.workExperience.forEach((exp, index) => {
     if (index > 0) {
-      doc.moveDown(1);
+      doc.moveDown(0.5);
     }
 
+    // Job Title (Left) and Dates (Right)
+    const startY = doc.y;
     doc.font('Helvetica-Bold')
-       .fontSize(11)
+       .fontSize(10)
        .fillColor(textColor)
-       .text(exp.jobTitle);
-    
-    const companyLine = [
-      exp.company,
-      exp.companyDescription
-    ].filter(Boolean).join(' | ');
-
-    doc.font('Helvetica')
-       .fontSize(11)
-        .fillColor(textColor)
-        .text(companyLine);
+       .text(exp.jobTitle, { continued: false });
     
     const dateAndLocation = [
       `${exp.startDate} - ${exp.endDate || 'Present'}`,
       exp.location
     ].filter(Boolean).join(' | ');
+
+    // Print Date aligned right on the same line level
+    doc.y = startY;
+    doc.font('Helvetica-Bold')
+       .fontSize(10)
+       .text(dateAndLocation, { align: 'right' });
     
-    doc.font('Helvetica')
-       .fontSize(11)
+    // Company (Left)
+    const companyLine = [
+      exp.company,
+      exp.companyDescription
+    ].filter(Boolean).join(' | ');
+
+    doc.font('Helvetica-Bold')
+       .fontSize(9)
        .fillColor(textColor)
-       .text(dateAndLocation);
+       .text(companyLine);
     
-    doc.moveDown(0.5);
+    doc.moveDown(0.2);
     
     if (exp.description) {
       doc.font('Helvetica')
-         .fontSize(11)
+         .fontSize(10)
          .fillColor(textColor)
           .text((() => {
             const cd = (exp.companyDescription || '').toString().trim();
@@ -154,88 +178,98 @@ function generateMinimalTemplate(data, doc, language = 'en') {
             }
           })(), {
            align: 'justify',
-           lineGap: 2
+           lineGap: 1.5
          });
     }
 
     if (exp.techStack) {
+      doc.moveDown(0.2);
       const { getLanguageConfig } = require('../utils/language');
       const techLabel = (getLanguageConfig(language).labels && getLanguageConfig(language).labels.tech) || 'Tech';
       doc.font('Helvetica')
-         .fontSize(10)
+         .fontSize(9)
          .fillColor(textColor)
          .text(`${techLabel}: ${exp.techStack}`);
     }
   });
 
-  doc.moveDown(1);
+  doc.moveDown(0.5);
 
   // Education
   // Add separator before Education section
   doc.strokeColor(textColor)
      .lineWidth(0.5)
-     .moveTo(50, doc.y)
-     .lineTo(545, doc.y)
+     .moveTo(36, doc.y)
+     .lineTo(576, doc.y)
      .stroke();
-  doc.moveDown(1);
+  doc.moveDown(0.5);
   
   doc.font('Helvetica-Bold')
-     .fontSize(11)
+     .fontSize(10)
      .fillColor(textColor)
      .text(languageConfig.sections.education);
-  doc.moveDown(0.5);
+  doc.moveDown(0.2);
   doc.font('Helvetica');
   
   data.education.forEach((edu, index) => {
     if (index > 0) {
-      doc.moveDown(1);
+      doc.moveDown(0.5);
     }
 
+    const startY = doc.y;
     doc.font('Helvetica-Bold')
-       .fontSize(11)
+       .fontSize(10)
        .fillColor(textColor)
        .text(edu.degree);
     
-    const educationDetails = [
-      edu.institution,
-      edu.major,
-      edu.graduationYear,
-      edu.gpa ? `GPA: ${edu.gpa}` : null
-    ].filter(Boolean).join(' | ');
+    const dateLine = `${edu.startYear ? edu.startYear + (edu.graduationYear ? ' - ' : '') : ''}${edu.graduationYear || ''}`;
+    doc.y = startY;
+    doc.font('Helvetica-Bold')
+       .fontSize(10)
+       .text(dateLine, { align: 'right' });
     
     doc.font('Helvetica')
-       .fontSize(11)
+       .fontSize(10)
        .fillColor(textColor)
-       .text(educationDetails);
-    
+       .text(edu.institution);
+       
     if (edu.description) {
-      doc.moveDown(0.5);
+      doc.moveDown(0.2);
       doc.font('Helvetica')
-         .fontSize(11)
+         .fontSize(10)
          .fillColor(textColor)
          .text(edu.description, {
            align: 'justify',
-           lineGap: 2
+           lineGap: 1.5
          });
     }
   });
 
   // Certifications
-  if (data.certifications.length > 0) {
-    doc.moveDown(1);
+  if (data.certifications && data.certifications.length > 0) {
+    doc.moveDown(0.5);
+    // Add separator before Certifications section
+    doc.strokeColor(textColor)
+       .lineWidth(0.5)
+       .moveTo(36, doc.y)
+       .lineTo(576, doc.y)
+       .stroke();
+    doc.moveDown(0.5);
+
     doc.font('Helvetica-Bold')
-       .fontSize(11)
+       .fontSize(10)
        .fillColor(textColor)
        .text(languageConfig.sections.certifications);
-    doc.moveDown(0.5);
+    doc.moveDown(0.2);
     
     data.certifications.forEach((cert, index) => {
       if (index > 0) {
-        doc.moveDown(1);
+        doc.moveDown(0.5);
       }
 
+      const startY = doc.y;
       doc.font('Helvetica-Bold')
-         .fontSize(11)
+         .fontSize(10)
          .fillColor(textColor)
          .text(cert.name);
       
@@ -249,17 +283,19 @@ function generateMinimalTemplate(data, doc, language = 'en') {
         }
       })();
 
-      const certDetails = [
-        cert.issuer,
-        issueYear
-      ].filter(Boolean).join(' | ');
-      
+      if (issueYear) {
+        doc.y = startY;
+        doc.font('Helvetica-Bold')
+           .fontSize(10)
+           .text(issueYear, { align: 'right' });
+      }
+
       doc.font('Helvetica')
-         .fontSize(11)
+         .fontSize(10)
          .fillColor(textColor)
-         .text(certDetails);
+         .text(cert.issuer);
     });
   }
 }
 
-module.exports = generateMinimalTemplate; 
+module.exports = generateMinimalTemplate;
