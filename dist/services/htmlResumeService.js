@@ -62,7 +62,8 @@ function generateHTMLResume(data, templateName = 'colorful', language = 'en') {
             .map(l => {
             const name = (0, language_1.localizeLanguageName)((l.name || '').trim(), language);
             const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1);
-            return `${capitalizedName}: ${l.proficiency}`;
+            const proficiency = (0, language_1.localizeProficiency)((l.proficiency || '').trim(), language);
+            return `${capitalizedName}: ${proficiency}`;
         })
             .join(', '),
         skillsLine: (data.skills || [])

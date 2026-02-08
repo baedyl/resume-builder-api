@@ -1625,8 +1625,28 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
             return;
         }
 
-        const { template = 'colorful', language = 'en', ...resumeData } = req.body;
-        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language');
+        // NOTE: Frontend preview uses query params (`/html?template=minimal`).
+        // Some clients also pass template/language in query for this POST endpoint.
+        // Support both body + query to avoid silently falling back to defaults.
+        const template =
+            (typeof req.body?.template === 'string' && req.body.template.trim().length > 0)
+                ? req.body.template
+                : ((typeof req.query?.template === 'string' && req.query.template.trim().length > 0)
+                    ? req.query.template
+                    : 'colorful');
+
+        const language =
+            (typeof req.body?.language === 'string' && req.body.language.trim().length > 0)
+                ? req.body.language
+                : ((typeof req.query?.language === 'string' && req.query.language.trim().length > 0)
+                    ? req.query.language
+                    : 'en');
+
+        const { template: _t, language: _l, ...resumeData } = req.body;
+        const languageProvided =
+            (typeof req.body?.language === 'string' && req.body.language.trim().length > 0)
+            || (typeof req.query?.language === 'string' && req.query.language.trim().length > 0);
+
         const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
         const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
@@ -1691,6 +1711,7 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
                 }
             } catch {}
         }
+        console.log('save-and-html-pdf using template:', template, 'language:', effectiveLanguage);
         const html = generateHTMLResume(htmlResumeData, template as string, effectiveLanguage);
 
         // Convert HTML to PDF using Puppeteer
@@ -1715,12 +1736,33 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // Ensure print CSS is applied when rendering to PDF.
+        // (Chromium usually does this automatically for page.pdf(), but making it explicit avoids
+        // environment-dependent differences between preview and generated PDF.)
+        await page.emulateMediaType('print');
+
+        // Force A4 and remove any implicit page margins.
+        // Some environments apply default print margins unless @page is explicitly defined.
+        await page.addStyleTag({ content: '@page { size: A4; margin: 0; }' });
         
         // Generate PDF
+        const noMarginTemplates = ['minimal', 'modern', 'colorful'];
+        const useMinimalMargins = noMarginTemplates.includes(template as string);
+
         const pdf = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: {
+            preferCSSPageSize: true,
+            // Slightly scale down templates that are designed for on-screen preview so they don't
+            // spill onto a 2nd page due to font/rendering differences.
+            scale: (template as string) === 'minimal' ? 0.97 : 1,
+            margin: useMinimalMargins ? {
+                top: '0mm',
+                right: '0mm',
+                bottom: '0mm',
+                left: '0mm'
+            } : {
                 top: '20mm',
                 right: '20mm',
                 bottom: '20mm',
@@ -1751,10 +1793,28 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
     try {
         const userId = req.user?.sub;
         const resumeId = parseInt(req.params.id, 10);
-        const { template = 'colorful', language = 'en' } = req.body;
-        const languageProvided = Object.prototype.hasOwnProperty.call(req.body, 'language')
-            && typeof req.body.language === 'string'
-            && req.body.language.trim().length > 0;
+
+        // NOTE: HTML preview endpoint takes query params (`/html?template=minimal`).
+        // Some clients mistakenly send `/html-pdf?template=minimal` without including it in the POST body.
+        // Support both to ensure the selected template is actually used.
+        const template =
+            (typeof req.body?.template === 'string' && req.body.template.trim().length > 0)
+                ? req.body.template
+                : ((typeof req.query?.template === 'string' && req.query.template.trim().length > 0)
+                    ? req.query.template
+                    : 'colorful');
+
+        const language =
+            (typeof req.body?.language === 'string' && req.body.language.trim().length > 0)
+                ? req.body.language
+                : ((typeof req.query?.language === 'string' && req.query.language.trim().length > 0)
+                    ? req.query.language
+                    : 'en');
+
+        const languageProvided =
+            (typeof req.body?.language === 'string' && req.body.language.trim().length > 0)
+            || (typeof req.query?.language === 'string' && req.query.language.trim().length > 0);
+
         const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
 
         if (!userId) {
@@ -1824,6 +1884,7 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
                 }
             } catch {}
         }
+        console.log('html-pdf using template:', template, 'language:', effectiveLanguage);
         const html = generateHTMLResume(resumeData, template as string, effectiveLanguage);
 
         // Convert HTML to PDF using Puppeteer
@@ -1848,12 +1909,28 @@ router.post('/:id/html-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         
         // Set content and wait for rendering
         await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // Ensure print CSS is applied when rendering to PDF.
+        await page.emulateMediaType('print');
+
+        // Force A4 and remove any implicit page margins.
+        await page.addStyleTag({ content: '@page { size: A4; margin: 0; }' });
         
         // Generate PDF
+        const noMarginTemplates = ['minimal', 'modern', 'colorful'];
+        const useMinimalMargins = noMarginTemplates.includes(template as string);
+
         const pdf = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: {
+            preferCSSPageSize: true,
+            scale: (template as string) === 'minimal' ? 0.97 : 1,
+            margin: useMinimalMargins ? {
+                top: '0mm',
+                right: '0mm',
+                bottom: '0mm',
+                left: '0mm'
+            } : {
                 top: '20mm',
                 right: '20mm',
                 bottom: '20mm',

@@ -125,17 +125,21 @@ export const LANGUAGE_CONFIG = {
 export function localizeProficiency(label: string, languageCode: string = 'en'): string {
     const config = getLanguageConfig(languageCode);
     const map = (config as any).proficiencyMap || {};
+
+    // Normalize input (DB/user content sometimes includes trailing spaces or inconsistent casing)
+    const normalizedLabel = (label || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedLabel) return '';
     
     // Try exact match
-    if (map[label]) return map[label];
+    if (map[normalizedLabel]) return map[normalizedLabel];
     
     // Try case-insensitive match
-    const lowerLabel = label.toLowerCase();
+    const lowerLabel = normalizedLabel.toLowerCase();
     const key = Object.keys(map).find(k => k.toLowerCase() === lowerLabel);
     if (key) return map[key];
     
     // Fallback: capitalize the first letter
-    return label.charAt(0).toUpperCase() + label.slice(1);
+    return normalizedLabel.charAt(0).toUpperCase() + normalizedLabel.slice(1);
 }
 
 export function localizeLanguageName(name: string, languageCode: string = 'en'): string {
