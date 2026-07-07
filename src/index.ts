@@ -34,7 +34,8 @@ const app = express();
 // Configure CORS for your frontend origins
 app.use(cors({
     origin: ['http://localhost:5173', 'https://www.proairesume.online', 'https://resume-builder-front.vercel.app'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
 }));
 
 // IMPORTANT: Stripe webhook must come BEFORE express.json() to handle raw body
