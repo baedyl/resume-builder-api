@@ -77,7 +77,7 @@ export class JobMatchingService {
     const reasons: string[] = [];
 
     // Skill matching (40% weight)
-    const userSkillIds = resume.skills.map((s: any) => s.skillId);
+    const userSkillIds = resume.skills.map((s: any) => s.id);
     const requiredSkillIds = job.skills.filter((s: any) => s.isRequired).map((s: any) => s.skillId);
     const preferredSkillIds = job.skills.filter((s: any) => !s.isRequired).map((s: any) => s.skillId);
 
@@ -167,12 +167,12 @@ export class JobMatchingService {
   }
 
   private static getMatchedSkills(resume: any, job: any): string[] {
-    const userSkillIds = resume.skills.map((s: any) => s.skillId);
+    const userSkillIds = resume.skills.map((s: any) => s.id);
     const jobSkillIds = job.skills.map((s: any) => s.skillId);
 
     return resume.skills
-      .filter((userSkill: any) => jobSkillIds.includes(userSkill.skillId))
-      .map((userSkill: any) => userSkill.skill.name);
+      .filter((userSkill: any) => jobSkillIds.includes(userSkill.id))
+      .map((userSkill: any) => userSkill.name);
   }
 
   private static getMatchReasons(resume: any, job: any): string[] {
@@ -204,7 +204,7 @@ export class JobMatchingService {
 
     // Add skills
     resume.skills.forEach((skill: any) => {
-      text += `${skill.skill.name} `;
+      text += `${skill.name} `;
     });
 
     // Add education
