@@ -8,7 +8,7 @@ const language_1 = require("./language");
 const preserveTerms_1 = require("./preserveTerms");
 async function callOpenAIWithRetry(prompt, systemMessage = 'You are a helpful assistant.', options = {}) {
     var _a, _b, _c;
-    const { model = 'gpt-5.2', temperature = 0.7, maxTokens = 500, maxRetries = 2 } = options;
+    const { model = process.env.OPENAI_MODEL || 'gpt-5.2', temperature = 0.7, maxTokens = 500, maxRetries = 2 } = options;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const response = await openai_1.openai.chat.completions.create({
@@ -18,7 +18,7 @@ async function callOpenAIWithRetry(prompt, systemMessage = 'You are a helpful as
                     { role: 'user', content: prompt },
                 ],
                 temperature: temperature + (attempt - 1) * 0.1, // Increase creativity on retries
-                max_completion_tokens: maxTokens + (attempt - 1) * 100, // Increase token limit on retries
+                max_tokens: maxTokens + (attempt - 1) * 100, // Increase token limit on retries
             });
             const content = (_c = (_b = (_a = response.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.content) === null || _c === void 0 ? void 0 : _c.trim();
             if (content && content.length > 0) {
@@ -68,7 +68,7 @@ Text:
 ${textForModel}`;
     try {
         const result = await callOpenAIWithRetry(prompt, systemMessage, {
-            model: 'gpt-5.2',
+            model: process.env.OPENAI_MODEL || 'gpt-5.2',
             temperature: 0.2,
             maxTokens: Math.min(Math.max(textForModel.length * 2, 200), 1200),
             maxRetries: 2,

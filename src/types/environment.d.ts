@@ -3,7 +3,9 @@ declare global {
     interface ProcessEnv {
       DATABASE_URL: string;
       OPENAI_API_KEY: string;
-      OPENAI_ASSISTANT_ID: string;
+      OPENAI_BASE_URL?: string;
+      OPENAI_MODEL?: string;
+      OPENAI_ASSISTANT_ID?: string;
       STRIPE_SECRET_KEY: string;
       STRIPE_PUBLISHABLE_KEY: string;
       STRIPE_WEBHOOK_SECRET: string;

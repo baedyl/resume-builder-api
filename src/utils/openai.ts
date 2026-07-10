@@ -23,7 +23,7 @@ export async function callOpenAIWithRetry(
     options: OpenAIOptions = {}
 ): Promise<string | null> {
     const {
-        model = 'gpt-5.2',
+        model = process.env.OPENAI_MODEL || 'gpt-5.2',
         temperature = 0.7,
         maxTokens = 500,
         maxRetries = 2
@@ -38,7 +38,7 @@ export async function callOpenAIWithRetry(
                     { role: 'user', content: prompt },
                 ],
                 temperature: temperature + (attempt - 1) * 0.1, // Increase creativity on retries
-                max_completion_tokens: maxTokens + (attempt - 1) * 100, // Increase token limit on retries
+                max_tokens: maxTokens + (attempt - 1) * 100, // Increase token limit on retries
             });
 
             const content = response.choices[0]?.message?.content?.trim();
@@ -100,7 +100,7 @@ Text:
 ${textForModel}`;
     try {
         const result = await callOpenAIWithRetry(prompt, systemMessage, {
-            model: 'gpt-5.2',
+            model: process.env.OPENAI_MODEL || 'gpt-5.2',
             temperature: 0.2,
             maxTokens: Math.min(Math.max(textForModel.length * 2, 200), 1200),
             maxRetries: 2,

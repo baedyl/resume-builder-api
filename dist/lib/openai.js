@@ -10,5 +10,6 @@ if (!process.env.OPENAI_API_KEY) {
 }
 exports.openai = new openai_1.default({
     apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL,
 });
 exports.default = exports.openai;

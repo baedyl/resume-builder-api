@@ -219,7 +219,7 @@ async function translateResumeContent(
             ...edu,
             degree: (await translateField(edu.degree)) ?? edu.degree,
             major: (await translateField(edu.major)) ?? edu.major,
-            institution: edu.institution,
+            institution: (await translateField(edu.institution)) ?? edu.institution,
             description: (await translateField(edu.description)) ?? edu.description,
         }))
     );
@@ -618,15 +618,6 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
         const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
-        const resume = await createResume({
-            ...validatedData,
-            education: (validatedData.education || []).map((edu: any) => ({
-                ...edu,
-                startYear: edu?.startYear ?? undefined,
-            })),
-            userId
-        } as ResumeData);
-
         // Check if user is premium, if not restrict to basic template
         const isPremium = req.user?.isPremium || false;
         const finalTemplate = isPremium ? template : 'modern';
@@ -634,6 +625,15 @@ router.post('/save-and-pdf', ensureAuthenticated, withPremiumFeatures, asyncHand
         const outputData = languageProvided
             ? await translateResumeContent(validatedData, normalizedLanguage)
             : validatedData;
+
+        const resume = await createResume({
+            ...outputData,
+            education: (outputData.education || []).map((edu: any) => ({
+                ...edu,
+                startYear: edu?.startYear ?? undefined,
+            })),
+            userId
+        } as ResumeData);
 
         // Ensure skills are properly formatted for PDF template
         const pdfData = {
@@ -865,10 +865,6 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
             return;
         }
 
-        // Process skills and languages
-        const processedSkills = skillsProvided ? await processSkills(validatedData.skills) : [];
-        const processedLanguages = languagesProvided ? await processLanguages(validatedData.languages) : [];
-
         // Handle translation when user wants to change the resume language
         // This will translate content from its detected source language to the target language specified in the request
         if (validatedData.language) {
@@ -902,12 +898,12 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 console.log(`Source language detected from: ${validatedData.summary ? 'summary' : 'work experience'}`);
                 
                 // Fields that get translated:
-                // - Summary, job titles, descriptions, degrees, certifications
+                // - Summary, job titles, descriptions, degrees, certifications, institution names
                 // - Skills (technical terms that might benefit from translation)
                 // - Language proficiency levels (e.g., "Fluent" -> "Courant")
                 
                 // Fields that are preserved (typically proper nouns):
-                // - Company names, institution names, issuer names
+                // - Company names, issuer names
                 // - Language names (e.g., "English", "French")
                 
                 if (validatedData.summary) {
@@ -929,7 +925,7 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                         ...edu,
                         degree: edu.degree ? await translateText(edu.degree, targetLanguage) : edu.degree,
                         major: edu.major ? await translateText(edu.major, targetLanguage) : edu.major,
-                        institution: edu.institution, // proper noun
+                        institution: edu.institution ? await translateText(edu.institution, targetLanguage) : edu.institution,
                         description: edu.description ? await translateText(edu.description, targetLanguage) : edu.description,
                     })));
                 }
@@ -964,6 +960,10 @@ router.put('/:id', ensureAuthenticated, asyncHandler(async (req: any, res) => {
                 console.log(`No translation needed: content is already in ${targetLanguage}`);
             }
         }
+
+        // Process skills and languages (after translation, so translated names are persisted)
+        const processedSkills = skillsProvided ? await processSkills(validatedData.skills) : [];
+        const processedLanguages = languagesProvided ? await processLanguages(validatedData.languages) : [];
 
         // Update the resume with cascade updates
         const updateData: any = {};
@@ -1367,91 +1367,73 @@ router.post('/:id/enhance-pdf', ensureAuthenticated, requirePremium, asyncHandle
         console.log(`Total unique skills for enhancement: ${uniqueSkills.length}`);
         console.log('Skills to include:', uniqueSkills.map(skill => skill.name));
 
-        const prompt: string = `You are an expert resume strategist and professional writer. Your task is to rewrite the provided resume to specifically target the Job Description (JD) provided.
+        const prompt: string = `You are a resume optimizer. Tailor the resume below to match the job description.
 
-OBJECTIVE:
-Create a "tailored" version of this resume that scores highly on ATS (Applicant Tracking Systems) and appeals to human recruiters for this specific role.
-
-INSTRUCTIONS:
-
-1.  **Professional Summary**:
-    *   Rewrite the summary completely. It must be a compelling "elevator pitch" that directly addresses the core requirements in the JD.
-    *   Incorporate the exact job title from the JD if applicable.
-    *   Highlight the most relevant years of experience and key achievements that match the JD.
-
-2.  **Skills Section**:
-    *   Integrate the "Matched Skills" listed below.
-    *   Organize skills logically.
-    *   Ensure high-priority keywords from the JD are present.
-
-3.  **Work Experience**:
-    *   **Reorder & Prioritize**: For each role, reorder bullet points so the most relevant experience for *this* JD comes first.
-    *   **Keyword Integration**: Rewrite bullet points to naturally include keywords and phrases from the JD (e.g., if JD asks for "cross-functional collaboration", rephrase a relevant bullet to use that term).
-    *   **Action & Impact**: Start every bullet with a strong action verb. Focus on *achievements* and *results* (quantified if possible) rather than just responsibilities.
-    *   **Relevance**: Condense or remove bullet points that are completely irrelevant to the target role to keep the resume focused.
-    *   **Tech Stack**: Update the \`techStack\` field to list relevant technologies used in that role, prioritizing those mentioned in the JD.
-
-4.  **General Tone**:
-    *   Use professional, active, and confident language.
-    *   Maintain truthfulness—do not invent experiences, but frame existing ones in the most relevant light.
+RULES:
+- Return ONLY valid JSON, no markdown, no explanation
+- Be concise: keep descriptions to 1-2 sentences max
+- Use bullet points (•) for work experience descriptions
+- Include relevant keywords from the job description
+- Do not invent experiences, only reframe existing ones
 
 ${languageInfo.instruction}
 
-IMPORTANT FORMATTING:
-*   Work experience descriptions MUST be a single string with bullet points using '•'.
-*   techStack in workExperience should be a comma-separated string (e.g. "React, Node.js, TypeScript").
-*   Return ONLY the JSON object.
+Skills to include: ${uniqueSkills.map(s => s.name).join(', ')}
 
-Matched Skills to Include:
-${uniqueSkills.map(skill => skill.name).join(', ')}
+Job Description: ${jobDescription}
 
-Job Description:
-${jobDescription}
+Original Resume: ${JSON.stringify(resumeData)}
 
-Original Resume:
-${JSON.stringify(resumeData, null, 2)}
+Return JSON with this structure:
+{"fullName":"","email":"","phone":"","address":"","linkedIn":"","website":"","summary":"","skills":[{"name":""}],"languages":[{"name":"","proficiency":""}],"workExperience":[{"jobTitle":"","company":"","location":"","startDate":"","endDate":"","description":"","companyDescription":"","techStack":""}],"education":[{"degree":"","major":"","institution":"","graduationYear":0,"gpa":0,"description":""}],"certifications":[{"name":"","issuer":"","issueDate":""}]}`;
 
-Return the enhanced resume as structured JSON matching this format:
-{
-  "fullName": "...",
-  "email": "...",
-  "phone": "...",
-  "address": "...",
-  "linkedIn": "...",
-  "website": "...",
-  "summary": "...",
-  "skills": [{ "name": "..." }],
-  "languages": [{ "name": "...", "proficiency": "..." }],
-  "workExperience": [{ "jobTitle": "...", "company": "...", "location": "...", "startDate": "...", "endDate": "...", "description": "...", "companyDescription": "...", "techStack": "..." }],
-  "education": [{ "degree": "...", "major": "...", "institution": "...", "graduationYear": "...", "gpa": "...", "description": "..." }],
-  "certifications": [{ "name": "...", "issuer": "...", "issueDate": "..." }]
-}
-`;
-
+        console.log('Prompt:', prompt);
         // Call OpenAI to enhance the resume
         let enhancedResume = null;
         const maxRetries = 2;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
+                console.log(`Enhancement attempt ${attempt}/${maxRetries}...`);
                 const response = await openai.chat.completions.create({
-                    model: 'gpt-5.2',
+                    model: process.env.OPENAI_MODEL || 'gpt-5.2',
                     messages: [
                         { role: 'system', content: languageConfig.systemMessage },
                         { role: 'user', content: prompt },
                     ],
-                    response_format: { type: 'json_object' },
                     temperature: 0.5,
-                    max_completion_tokens: 2500,
+                    max_tokens: 8192,
+                });
+
+                console.log('AI response structure:', {
+                    hasChoices: !!response.choices,
+                    choicesLength: response.choices?.length,
+                    firstChoiceHasMessage: !!response.choices?.[0]?.message,
+                    contentType: typeof response.choices?.[0]?.message?.content,
+                    contentLength: response.choices?.[0]?.message?.content?.length,
                 });
 
                 const content = response.choices[0]?.message?.content?.trim();
-                if (content) {
-                    enhancedResume = tryParseJsonObject(content);
-                    if (enhancedResume) break;
-                    console.warn(`JSON parse error on attempt ${attempt}: unable to parse model output as JSON object`);
+                if (!content) {
+                    console.warn(`Attempt ${attempt}: AI returned empty content`);
+                    console.log('Full response:', JSON.stringify(response, null, 2).substring(0, 1000));
+                    continue;
                 }
-            } catch (apiError) {
-                console.error(`API error on attempt ${attempt}:`, apiError);
+
+                console.log(`Attempt ${attempt}: AI returned ${content.length} chars, first 200:`, content.substring(0, 200));
+                console.log(`Attempt ${attempt}: Last 200 chars:`, content.substring(Math.max(0, content.length - 200)));
+                enhancedResume = tryParseJsonObject(content);
+                if (enhancedResume) {
+                    console.log(`Attempt ${attempt}: Successfully parsed JSON with keys:`, Object.keys(enhancedResume));
+                    break;
+                }
+                console.warn(`Attempt ${attempt}: JSON parse failed`);
+            } catch (apiError: any) {
+                console.error(`API error on attempt ${attempt}:`, {
+                    message: apiError.message,
+                    status: apiError.status,
+                    code: apiError.code,
+                    type: apiError.type,
+                });
                 if (attempt === maxRetries) {
                     throw apiError;
                 }
@@ -1650,19 +1632,19 @@ router.post('/save-and-html-pdf', ensureAuthenticated, withPremiumFeatures, asyn
         const normalizedLanguage = normalizeLanguageCode(typeof language === 'string' ? language : undefined);
         const validatedData = ResumeSchema.parse({ ...resumeData, language: normalizedLanguage });
 
-        // Save the resume to database first
+        const outputData = languageProvided
+            ? await translateResumeContent(validatedData, normalizedLanguage)
+            : validatedData;
+
+        // Save the resume to database (with translated content, so persisted data matches display)
         const resume = await createResume({
-            ...validatedData,
-            education: (validatedData.education || []).map((edu: any) => ({
+            ...outputData,
+            education: (outputData.education || []).map((edu: any) => ({
                 ...edu,
                 startYear: edu?.startYear ?? undefined,
             })),
             userId
         } as ResumeData);
-
-        const outputData = languageProvided
-            ? await translateResumeContent(validatedData, normalizedLanguage)
-            : validatedData;
 
         // Convert resume data to HTML format
         const htmlResumeData = {
@@ -2004,138 +1986,146 @@ router.post('/upload', ensureAuthenticated, upload.single('file'), asyncHandler(
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        // Step 1: Upload file to OpenAI
-        const formData = new (require('form-data'))();
-        formData.append('file', req.file.buffer, {
-            filename: req.file.originalname,
-            contentType: req.file.mimetype,
-        });
-        formData.append('purpose', 'assistants');
+        // Step 1: Extract text from file locally
+        let extractedText: string;
+        const { buffer, mimetype, originalname } = req.file;
 
-        const openaiApiKey = process.env.OPENAI_API_KEY;
-        const openaiAssistantId = process.env.OPENAI_ASSISTANT_ID;
-        if (!openaiApiKey || !openaiAssistantId) {
-            return res.status(500).json({ error: 'OpenAI API key or Assistant ID not configured' });
-        }
-
-        // Upload file
-        const uploadResponse = await axios.post('https://api.openai.com/v1/files', formData, {
-            headers: {
-                ...formData.getHeaders(),
-                'Authorization': `Bearer ${openaiApiKey}`,
-            },
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-        });
-        const fileId = uploadResponse.data.id;
-
-        // Step 2: Create a new thread
-        const threadResponse = await axios.post('https://api.openai.com/v1/threads', {}, {
-            headers: {
-                'Authorization': `Bearer ${openaiApiKey}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json',
-            },
-        });
-        const threadId = threadResponse.data.id;
-
-        // Step 3: Add a message to the thread with the file attachment
-        const messageResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            role: 'user',
-            content: 'Please extract the information from this resume and return it in the specified JSON format.',
-            attachments: [
-                {
-                    file_id: fileId,
-                    tools: [{ type: 'file_search' }]
-                }
-            ]
-        }, {
-            headers: {
-                'Authorization': `Bearer ${openaiApiKey}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json',
-            },
-        });
-
-        // Step 4: Run the assistant
-        const runResponse = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
-            assistant_id: openaiAssistantId,
-        }, {
-            headers: {
-                'Authorization': `Bearer ${openaiApiKey}`,
-                'OpenAI-Beta': 'assistants=v2',
-                'Content-Type': 'application/json',
-            },
-        });
-        const runId = runResponse.data.id;
-
-        // Step 5: Poll for completion
-        let runStatus = 'in_progress';
-        let pollAttempts = 0;
-        const maxPollAttempts = 30; // 5 minutes max
-
-        while (runStatus === 'in_progress' || runStatus === 'queued') {
-            await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
-            pollAttempts++;
-
-            if (pollAttempts > maxPollAttempts) {
-                return res.status(408).json({ error: 'Processing timeout' });
+        if (mimetype === 'application/pdf') {
+            const pdfjsLib = require('pdfjs-dist');
+            pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+            const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+            const pdf = await loadingTask.promise;
+            const textParts: string[] = [];
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                textParts.push(textContent.items.map((item: any) => item.str).join(' '));
             }
+            extractedText = textParts.join('\n');
+        } else if (
+            mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+            mimetype === 'application/msword'
+        ) {
+            const mammoth = require('mammoth');
+            const result = await mammoth.extractRawText({ buffer });
+            extractedText = result.value;
+        } else {
+            return res.status(400).json({ error: 'Only PDF and Word documents are allowed' });
+        }
 
-            const statusResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-                headers: {
-                    'Authorization': `Bearer ${openaiApiKey}`,
-                    'OpenAI-Beta': 'assistants=v2',
+        if (!extractedText || extractedText.trim().length < 50) {
+            return res.status(400).json({ error: 'Could not extract enough text from the file. Please ensure the file contains readable text.' });
+        }
+
+        // Step 2: Send extracted text to LLM for structured extraction
+        const resumeSchemaJson = JSON.stringify({
+            type: 'object',
+            required: ['fullName', 'email', 'workExperience', 'education'],
+            properties: {
+                fullName: { type: 'string', description: 'Full name of the person' },
+                email: { type: 'string', format: 'email' },
+                phone: { type: 'string' },
+                address: { type: 'string' },
+                linkedIn: { type: 'string' },
+                website: { type: 'string' },
+                summary: { type: 'string', description: 'Professional summary' },
+                skills: {
+                    type: 'array',
+                    items: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } }
                 },
-            });
-            runStatus = statusResponse.data.status;
-        }
-
-        if (runStatus !== 'completed') {
-            return res.status(500).json({ error: `Processing failed with status: ${runStatus}` });
-        }
-
-        // Step 6: Retrieve the messages
-        const messagesResponse = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            headers: {
-                'Authorization': `Bearer ${openaiApiKey}`,
-                'OpenAI-Beta': 'assistants=v2',
-            },
+                workExperience: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                        type: 'object',
+                        required: ['jobTitle', 'company', 'startDate'],
+                        properties: {
+                            jobTitle: { type: 'string' },
+                            company: { type: 'string' },
+                            location: { type: 'string' },
+                            startDate: { type: 'string', description: 'Start date in YYYY-MM-DD or MM/YYYY format' },
+                            endDate: { type: 'string', description: 'End date in YYYY-MM-DD or MM/YYYY format, or null if current' },
+                            isCurrent: { type: 'boolean' },
+                            description: { type: 'string' },
+                            companyDescription: { type: 'string' },
+                            techStack: { type: 'string' }
+                        }
+                    }
+                },
+                education: {
+                    type: 'array',
+                    minItems: 1,
+                    items: {
+                        type: 'object',
+                        required: ['degree', 'institution'],
+                        properties: {
+                            degree: { type: 'string' },
+                            major: { type: 'string' },
+                            institution: { type: 'string' },
+                            startYear: { type: 'integer' },
+                            graduationYear: { type: 'integer' },
+                            gpa: { type: 'number' },
+                            description: { type: 'string' }
+                        }
+                    }
+                },
+                languages: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        required: ['name', 'proficiency'],
+                        properties: { name: { type: 'string' }, proficiency: { type: 'string' } }
+                    }
+                },
+                certifications: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        required: ['name', 'issuer'],
+                        properties: { name: { type: 'string' }, issuer: { type: 'string' }, issueDate: { type: 'string' } }
+                    }
+                },
+                language: { type: 'string', default: 'en', description: 'ISO 639-1 language code of the resume' }
+            }
         });
 
-        const messages = messagesResponse.data.data;
-        const assistantMessage = messages.find((msg: any) => msg.role === 'assistant');
+        const systemPrompt = `You are a resume parser. Extract all information from the resume text and return it as a JSON object matching this schema:
 
-        if (!assistantMessage || !assistantMessage.content || !assistantMessage.content[0]) {
-            return res.status(500).json({ error: 'No response from assistant' });
+${resumeSchemaJson}
+
+Rules:
+- Return ONLY valid JSON, no markdown, no explanation
+- If a field is not found, omit it (except required fields which must have a value)
+- For dates, use YYYY-MM-DD format when possible, or MM/YYYY
+- For skills, extract individual skills (not categories)
+- For languages, use standard names (e.g., "English", "French", "Spanish")
+- For proficiency, use: "Native", "Fluent", "Advanced", "Intermediate", "Beginner"
+- If the resume is not in English, set the "language" field to the appropriate ISO 639-1 code
+- workExperience and education arrays must have at least one entry each`;
+
+        const response = await openai.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: extractedText }
+            ],
+            temperature: 0.1,
+            max_tokens: 4000,
+        });
+
+        const content = response.choices[0]?.message?.content;
+        if (!content) {
+            return res.status(500).json({ error: 'No response from AI model' });
         }
 
-        const extractedText = assistantMessage.content[0].text.value;
-
-        // Parse the JSON response
         let parsedData;
         try {
-            const jsonMatch = extractedText.match(/```json\n([\s\S]*?)\n```/) || extractedText.match(/```\n([\s\S]*?)\n```/) || extractedText.match(/({[\s\S]*})/);
-            if (jsonMatch) {
-                parsedData = JSON.parse(jsonMatch[1]);
-            } else {
-                parsedData = JSON.parse(extractedText);
-            }
+            const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/) || content.match(/({[\s\S]*})/);
+            parsedData = jsonMatch ? JSON.parse(jsonMatch[1] ?? jsonMatch[0]) : JSON.parse(content);
         } catch (parseError) {
             console.error('JSON parse error:', parseError);
-            console.log('Extracted text:', extractedText);
-            return res.status(500).json({ error: 'Failed to parse extracted data' });
-        }
-
-        // Clean up: Delete the uploaded file
-        try {
-            await axios.delete(`https://api.openai.com/v1/files/${fileId}`, {
-                headers: {
-                    'Authorization': `Bearer ${openaiApiKey}`,
-                },
-            });
-        } catch (deleteError) {
-            console.warn('Failed to delete uploaded file:', deleteError);
+            console.log('AI response:', content);
+            return res.status(500).json({ error: 'Failed to parse AI response' });
         }
 
         res.json(parsedData);
@@ -2179,19 +2169,32 @@ router.get('/subscription-status', ensureAuthenticated, withPremiumFeatures, asy
 function tryParseJsonObject(content: string): Record<string, any> | null {
     if (!content || typeof content !== 'string') return null;
     const raw = content.trim();
+    
+    // Try direct parse first
     try {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
     } catch {}
 
+    // Try fenced JSON with closing ```
     const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
     if (fenced?.[1]) {
         try {
-            const parsed = JSON.parse(fenced[1]);
+            const parsed = JSON.parse(fenced[1].trim());
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
         } catch {}
     }
 
+    // Try fenced JSON without closing ``` (extract everything after ```json)
+    const fencedOpen = raw.match(/```json\s*([\s\S]*)/i);
+    if (fencedOpen?.[1]) {
+        try {
+            const parsed = JSON.parse(fencedOpen[1].trim());
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        } catch {}
+    }
+
+    // Try to find first { and last } and extract that
     const objMatch = raw.match(/(\{[\s\S]*\})/);
     if (objMatch?.[1]) {
         try {
@@ -2199,6 +2202,7 @@ function tryParseJsonObject(content: string): Record<string, any> | null {
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
         } catch {}
     }
+    
     return null;
 }
 
@@ -2248,14 +2252,13 @@ ${jobDescription}`;
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-5.2',
+            model: process.env.OPENAI_MODEL || 'gpt-5.2',
             messages: [
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: extractionPrompt },
             ],
-            response_format: { type: 'json_object' },
             temperature: 0.3,
-            max_completion_tokens: 1000,
+            max_tokens: 1000,
         });
 
         const content = response.choices[0]?.message?.content?.trim();
@@ -2327,14 +2330,13 @@ Job Description:
 ${jobDescription}`;
 
         const additionalResponse = await openai.chat.completions.create({
-            model: 'gpt-5.2',
+            model: process.env.OPENAI_MODEL || 'gpt-5.2',
             messages: [
                 { role: 'system', content: languageConfig.systemMessage },
                 { role: 'user', content: additionalSkillsPrompt },
             ],
-            response_format: { type: 'json_object' },
             temperature: 0.5,
-            max_completion_tokens: 500,
+            max_tokens: 500,
         });
 
         const additionalContent = additionalResponse.choices[0]?.message?.content?.trim();
